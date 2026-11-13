@@ -1,0 +1,259 @@
+# Test steps from docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md, run by hand on
+# main. Each step's result is the run: auth type, HTTP status, error text,
+# time and provider version. Nothing here prints a token.
+#
+#   c2-list-workspaces   H2: the automation principal on github-oidc reads
+#                        the account API (a Terraform plan of databricks/).
+#   c4-create-bogus      H4 without building anything: the same workspace
+#                        create request twice, to a GCP project that doesn't
+#                        exist, without and then with the Google token header.
+#   c4-create-network    H4 / H12, only if C3 fails: the network
+#                        configuration through the API, with the header.
+#                        Does nothing if one with the same name exists.
+#   c4-create-workspace  H4: a classic workspace in the test project through
+#                        the API, with the header, on the network
+#                        configuration from C3 (or c4-create-network). Waits
+#                        until it is RUNNING or FAILED. Does nothing but
+#                        report if the workspace already exists.
+#   c6-update-workspace  H6: attach the private access settings the
+#                        databricks stack created to the workspace, the update
+#                        the provider can't make: PATCH without the header,
+#                        then with it if refused. Waits for RUNNING.
+
+name: databricks-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: Test step to run
+        required: true
+        type: choice
+        options:
+          - c2-list-workspaces
+          - c4-create-bogus
+          - c4-create-network
+          - c4-create-workspace
+          - c6-update-workspace
+
+permissions:
+  contents: read
+
+concurrency:
+  group: databricks-probe
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.15.9
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+  GCP_APPLY_SA: ${{ vars.GCP_APPLY_SA }}
+  GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+  GCP_REGION: us-central1
+  VPC_NAME: gha-test-vpc
+  SUBNET_NAME: gha-test-vpc-us-central1
+  NETWORK_NAME: gha-test-network
+  WORKSPACE_NAME: gha-test-classic
+  PAS_NAME: gha-test-pas-us-central1
+  DATABRICKS_HOST: https://accounts.gcp.databricks.com
+  DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+  DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+
+jobs:
+  c2:
+    if: github.ref == 'refs/heads/main' && inputs.step == 'c2-list-workspaces' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      TF_VAR_account_id: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      TF_VAR_automation_client_id: ${{ vars.DATABRICKS_CLIENT_ID }}
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The state bucket, and the header's Google token for the REST
+      # provider (databricks/rest.tf). The action masks the token.
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_SA }}
+          token_format: access_token
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="prefix=terraform/databricks"
+
+      # -lock=false: a read, so it never holds up an apply of the stack.
+      - name: plan (reads the account's workspaces)
+        env:
+          GCP_TOKEN: ${{ steps.gcp.outputs.access_token }}
+        run: |
+          source ../.github/scripts/databricks-token.sh
+          export TF_VAR_databricks_token="$DBX_TOKEN" TF_VAR_gcp_access_token="$GCP_TOKEN"
+          unset DBX_TOKEN
+          started=$(date -u +%FT%TZ)
+          set +e
+          terraform plan -input=false -no-color -lock=false -var-file=envs/test.tfvars > plan.log 2>&1
+          rc=$?
+          set -e
+          cat plan.log
+          {
+            echo "### C2 / H2: list workspaces on github-oidc"
+            echo "- started: $started; exit code: $rc"
+            echo "- $(terraform version | head -1); databricks provider: $(terraform version -json | jq -r '.provider_selections["registry.terraform.io/databricks/databricks"]')"
+            echo '```'
+            grep -E "workspace_count|No changes|Plan:|will be|must be|Error|error" plan.log | head -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+  # Every step but c2 runs in this job (named c4, after the first of them).
+  # One shape: a Google access token for the header, issued to the apply
+  # identity by the job's workload identity login (the action masks it), then
+  # one step that gets the Databricks token and makes the calls, so no token
+  # is ever passed between steps.
+  c4:
+    if: github.ref == 'refs/heads/main' && inputs.step != 'c2-list-workspaces' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_SA }}
+          token_format: access_token
+
+      - name: ${{ inputs.step }}
+        env:
+          GCP_TOKEN: ${{ steps.gcp.outputs.access_token }}
+          STEP: ${{ inputs.step }}
+        run: |
+          api="$DATABRICKS_HOST/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID"
+          echo "### $STEP, $(date -u +%FT%TZ)" >> "$GITHUB_STEP_SUMMARY"
+          source .github/scripts/databricks-token.sh
+
+          # call METHOD PATH BODY [curl args...]: BODY may be "". Writes the
+          # response to resp.json and prints the HTTP status.
+          call() {
+            local method=$1 path=$2 body=$3
+            shift 3
+            local data=()
+            [ -z "$body" ] || data=(--data "$body")
+            curl -sS -o resp.json -w '%{http_code}' -X "$method" "$api$path" \
+              -H "Authorization: Bearer $DBX_TOKEN" -H 'Content-Type: application/json' \
+              "${data[@]}" "$@"
+          }
+          header=(-H "X-Databricks-GCP-SA-Access-Token: $GCP_TOKEN")
+          report() {
+            echo "- **$1**: HTTP $2, $(jq -c '{error_code, message} | with_entries(select(.value != null))' resp.json 2>/dev/null || head -c 300 resp.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+          find_by_name() { # LIST_PATH NAME_FIELD NAME -> the object, or nothing
+            call GET "$1" "" > /dev/null
+            jq -c --arg f "$2" --arg n "$3" '[.[]? | select(.[$f] == $n)][0] // empty' resp.json
+          }
+
+          # Provisioning and updates take minutes. Polls without the header
+          # until RUNNING or a terminal status; leaves the last GET in
+          # resp.json and fails the step unless RUNNING.
+          wait_running() {
+            local status=""
+            for i in $(seq 1 60); do
+              code=$(call GET "/workspaces/$1" "")
+              status=$(jq -r '.workspace_status // empty' resp.json)
+              echo "$(date -u +%T) HTTP $code $status"
+              case "$status" in RUNNING|FAILED|BANNED|CANCELLING) break ;; esac
+              [ "$code" = 200 ] || break
+              sleep 30
+            done
+            echo "- final: HTTP $code, $(jq -c '{workspace_status, workspace_status_message}' resp.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+            [ "$status" = RUNNING ]
+          }
+
+          case "$STEP" in
+          c4-create-bogus)
+            # Nothing gets built: the project doesn't exist.
+            body='{"workspace_name":"probe-bogus-project","location":"us-central1","cloud_resource_container":{"gcp":{"project_id":"dbx-probe-nonexistent-000000"}}}'
+            code=$(call POST /workspaces "$body"); report "principal token only" "$code"
+            code=$(call POST /workspaces "$body" "${header[@]}"); report "principal token + header (apply identity)" "$code"
+            n=$(call GET /workspaces "" > /dev/null; jq '[.[] | select(.workspace_name == "probe-bogus-project")] | length' resp.json)
+            echo "- probe workspaces left in the account: $n" | tee -a "$GITHUB_STEP_SUMMARY"
+            [ "$n" = 0 ] || echo "::warning::A probe-bogus-project workspace exists; delete it."
+            ;;
+
+          c4-create-network)
+            existing=$(find_by_name /networks network_name "$NETWORK_NAME")
+            if [ -n "$existing" ]; then
+              echo "- network configuration \`$NETWORK_NAME\` already exists, created $(jq -r '.creation_time / 1000 | todate' <<<"$existing"); nothing to do" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            body=$(jq -nc --arg n "$NETWORK_NAME" --arg p "$GCP_PROJECT" --arg r "$GCP_REGION" --arg v "$VPC_NAME" --arg s "$SUBNET_NAME" \
+              '{network_name: $n, gcp_network_info: {network_project_id: $p, vpc_id: $v, subnet_id: $s, subnet_region: $r}}')
+            code=$(call POST /networks "$body" "${header[@]}"); report "create network configuration, with header" "$code"
+            [ "$code" = 200 ] || [ "$code" = 201 ] || exit 1
+            ;;
+
+          c4-create-workspace)
+            ws=$(find_by_name /workspaces workspace_name "$WORKSPACE_NAME")
+            if [ -z "$ws" ]; then
+              net=$(find_by_name /networks network_name "$NETWORK_NAME")
+              [ -n "$net" ] || { echo "No network configuration named $NETWORK_NAME: apply the databricks stack (C3) or run c4-create-network first." | tee -a "$GITHUB_STEP_SUMMARY"; exit 1; }
+              body=$(jq -nc --arg n "$WORKSPACE_NAME" --arg p "$GCP_PROJECT" --arg r "$GCP_REGION" --arg net "$(jq -r .network_id <<<"$net")" \
+                '{workspace_name: $n, location: $r, cloud_resource_container: {gcp: {project_id: $p}}, network_id: $net}')
+              code=$(call POST /workspaces "$body" "${header[@]}"); report "create workspace, with header" "$code"
+              [ "$code" = 200 ] || [ "$code" = 201 ] || exit 1
+              ws=$(cat resp.json)
+            else
+              echo "- workspace \`$WORKSPACE_NAME\` already exists; not creating it again" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+
+            wait_running "$(jq -r .workspace_id <<<"$ws")"
+            ;;
+
+          c6-update-workspace)
+            ws=$(find_by_name /workspaces workspace_name "$WORKSPACE_NAME")
+            [ -n "$ws" ] || { echo "No workspace named $WORKSPACE_NAME." | tee -a "$GITHUB_STEP_SUMMARY"; exit 1; }
+            pas=$(find_by_name /private-access-settings private_access_settings_name "$PAS_NAME")
+            [ -n "$pas" ] || { echo "No private access settings named $PAS_NAME: apply the databricks stack first." | tee -a "$GITHUB_STEP_SUMMARY"; exit 1; }
+            id=$(jq -r .workspace_id <<<"$ws")
+            pas_id=$(jq -r .private_access_settings_id <<<"$pas")
+            if [ "$(jq -r '.private_access_settings_id // empty' <<<"$ws")" = "$pas_id" ]; then
+              echo "- \`$PAS_NAME\` is already attached to \`$WORKSPACE_NAME\`; nothing to do" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "- workspace status before: $(jq -r .workspace_status <<<"$ws")" | tee -a "$GITHUB_STEP_SUMMARY"
+            body=$(jq -nc --arg p "$pas_id" '{private_access_settings_id: $p}')
+            # The API takes the changed fields as update_mask, as the SDK
+            # sends it; without one it answers 400 before any other check.
+            # Without the header first, the same call the provider made, then
+            # with it only if that was refused.
+            path="/workspaces/$id?update_mask=private_access_settings_id"
+            code=$(call PATCH "$path" "$body"); report "attach private access settings, principal token only" "$code"
+            if [ "$code" != 200 ]; then
+              code=$(call PATCH "$path" "$body" "${header[@]}"); report "attach private access settings, with header" "$code"
+              [ "$code" = 200 ] || exit 1
+            fi
+            wait_running "$id"
+            echo "- private access settings attached: $(jq -r --arg p "$pas_id" '.private_access_settings_id == $p' resp.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+            ;;
+          esac

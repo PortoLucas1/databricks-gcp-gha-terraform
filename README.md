@@ -1,0 +1,82 @@
+# Databricks on GCP from GitHub Actions: keyless Terraform with own-IdP SSO and Private Service Connect
+
+Reference implementation and test record for building **classic-compute Databricks workspaces on Google Cloud** from a **GitHub Actions** pipeline with **Terraform**, when:
+
+- the Databricks account's single sign-on uses its **own identity provider** (so Google ID tokens no longer work against the account API);
+- workspaces are reached **privately**, with Private Service Connect front end and back end;
+- the pipeline holds **no keys or stored secrets**: every job exchanges GitHub's OIDC token for short-lived Google and Databricks credentials.
+
+The lab ran on 2026-11-12 and 2026-11-13, was rebuilt from empty state in one pass to validate the whole design, and was then deleted. Everything needed to run it again is here: **[docs/REPRODUCE.md](docs/REPRODUCE.md)**. The `tfvars` files hold placeholders, and every workflow job that signs in skips itself until the repository variables from `bootstrap/` are set.
+
+## What was found
+
+The Databricks Terraform provider, authenticated by GitHub OIDC federation, can't create or update **workspaces, network configurations or VPC endpoint registrations** on an account with its own IdP: those Accounts API calls need a Google access token in the `X-Databricks-GCP-SA-Access-Token` header, which the provider doesn't send ([provider issue #5999](https://github.com/databricks/terraform-provider-databricks/issues/5999)). A generic REST provider ([`magodo/restful`](https://registry.terraform.io/providers/magodo/restful/latest)) sends both tokens, as ephemeral values that never reach a plan file or state, so **everything stays in Terraform**. Everything else (private access settings, permission assignments, workspace objects) works through the Databricks provider.
+
+| Hypothesis (from the [test requirements](docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md)) | Result |
+|---|---|
+| H1 Provider with `google_service_account` fails with SSO on | Prior evidence only (`401`), not rerun |
+| H2 A principal on `github-oidc` reads account APIs with SSO on | **Confirmed** |
+| H3 Network configurations and workspaces fail through the provider | **Confirmed** for create and update |
+| H4 Accounts API with the principal's token plus the header succeeds | **Confirmed**: network configuration, workspace create and update, endpoint registration |
+| H5 The header's Google identity needs no Databricks identity | **Confirmed** |
+| H6 API-made objects import cleanly; updates and deletes need the header | **Confirmed**; the REST provider closes the gap (create, import, update, delete) |
+| H7 Account objects that touch no GCP project work through the provider | **Confirmed** for private access settings and permission assignment; others not tested |
+| H8 Workspace-level resources work through the provider | **Confirmed** for a cluster policy and a cluster, through PSC with public access off; Unity Catalog objects not tested |
+| H9 Console creation with matching and non-matching Google accounts | Not tested |
+| H10 With SSO off, both paths create a workspace | Prior evidence only, not rerun |
+| H11 Automatic identity management with Entra on Google sign-in | Not tested (optional) |
+| H12 Private access settings and endpoint registration need the header | **Split**: private access settings don't, endpoint registration does |
+
+Beyond the hypotheses: fourteen findings (R1–R14), from GitHub's immutable-ID OIDC subject to the firewall rule a deleted workspace leaves behind, each with its effect on the configuration guide. The full matrix, evidence and findings: **[E1 results](docs/deliverables/E1_RESULTS.md)**.
+
+## Documents
+
+| Document | What it is |
+|---|---|
+| [Test requirements](docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md) | The question, public facts F1–F12, hypotheses H1–H12, the planned phases. Written before testing |
+| [Test plan and step log](docs/TEST_PLAN.md) | How each step ran and what it returned, step by step |
+| [E1 Results](docs/deliverables/E1_RESULTS.md) | Each hypothesis, its result and evidence; findings R1–R14; the end-to-end rebuild |
+| [E2 Capabilities](docs/deliverables/E2_CAPABILITIES.md) | What works through which provider, per object, and what stays outside Terraform |
+| [E3 Identity design](docs/deliverables/E3_IDENTITY.md) | Every identity, what it trusts and holds; the authentication sequence diagram |
+| [E4 Recommendation](docs/deliverables/E4_RECOMMENDATION.md) | The recommended approach, the alternatives, and the risks |
+| E5 Reference implementation | This repository |
+| [E6 Configuration guide](docs/deliverables/E6_CONFIGURATION_GUIDE.md) | End to end, in build order, with the architecture diagram |
+| [E7 Teardown record](docs/deliverables/E7_TEARDOWN.md) | Both teardowns and the final deletion |
+| [Authentication bootstrap](docs/AUTH_BOOTSTRAP.md) | How GitHub Actions authenticates to Google and Databricks, hop by hop |
+| [Private Service Connect scenarios](docs/PSC_SCENARIOS.md) | Front end only versus back end from creation |
+| [End-to-end rebuild plan](docs/E2E_REBUILD_PLAN.md) | The teardown-and-rebuild that validated the design |
+| [Reproduce](docs/REPRODUCE.md) | The runbook to build it again |
+
+Run and pull request numbers in the documents refer to the original lab repository, which stays private.
+
+## Repository layout
+
+| Path | Terraform root | State prefix | Runs as |
+|---|---|---|---|
+| `bootstrap/` | The pipeline's authentication: Google workload identity pool and provider, apply and plan identities, state bucket; the Databricks automation principal and its federation policy | administrators' own bucket | Administrators, locally, once |
+| repository root (`main.tf`, `psc.tf`, `frontend.tf`, `testvm.tf`) | GCP: VPCs, PSC endpoints, private DNS zone and response policy, the self-hosted runner VM and NAT | `terraform/test` | `gha-apply` on `main`; `gha-plan` (read-only) on pull requests |
+| `databricks/` | Databricks account: endpoint registrations, network configurations, private access settings, workspaces (REST provider), permission assignment, workspace DNS names | `terraform/databricks` | The automation principal on `github-oidc`, `main` only, plus `gha-apply`'s Google token |
+| `workspace/` | Inside a workspace: a cluster policy and a cluster | `terraform/workspace` | The automation principal, from the self-hosted runner, through the front-end endpoint |
+
+Workflows (`.github/workflows/`):
+
+- **`terraform`**: on pull requests and pushes to `main`: `fmt`, `validate`, Trivy, then plans. Pull requests plan the GCP stack read-only; `main` plans both stacks and keeps each plan as an artifact. A manual run with **destroy** plans the teardown.
+- **`apply`**: manual. Replays a reviewed plan from a given `terraform` run; refuses anything but a successful push-to-main run whose commit `main` has moved past only with documentation.
+- **`workspace`**: manual, on the self-hosted runner: the workspace stack, plan or plan and apply.
+- **`auth-check`**: manual. Shows each hop of the authentication chain without printing a credential.
+- **`psc-refusal`**: manual. The same identity and steps from inside the network and from the internet: shows the workspace refusing internet access to its own admin.
+- **`databricks-probe`**: manual. The test steps that weren't Terraform (direct API calls with and without the header).
+
+Every action is pinned to a commit SHA; provider versions are pinned in the lock files (Terraform 1.15.9, Databricks provider 1.142.0, `magodo/restful` 0.25.2, Google provider 8.11.0 when tested).
+
+## Limits of a private repository on the free plan
+
+GitHub doesn't offer branch protection or environment approvals for private repositories on the free plan, so in the lab whoever could push to `main` could use the apply identity, and the manual gate was a `workflow_dispatch`. With GitHub Pro, a public repository or an organization plan, bind the apply identity and the Databricks federation policy to a GitHub environment with required reviewers instead of the branch.
+
+## Cost while built
+
+The three PSC endpoints, about $0.01 an hour each; the runner VM (e2-small) and Cloud NAT, about $1.25 a day, only while the workspace stack is in use; clusters while they run (the policy terminates them after 20 idle minutes); a few small buckets Databricks creates per workspace. Actions minutes come from the repository's allowance.
+
+## License
+
+[MIT](LICENSE).

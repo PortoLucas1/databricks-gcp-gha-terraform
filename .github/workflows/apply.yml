@@ -1,0 +1,152 @@
+# The manual apply: it replays the exact plan a reviewed run made, never a
+# fresh one.
+#
+# Run it from Actions -> apply -> Run workflow, on main, with the stack and the
+# id of the terraform run whose plan to apply (the number in that run's URL).
+# Each stack's plan is its own artifact, so one run can be applied stack by
+# stack, GCP first. It refuses
+# a plan from anything but a successful push to main, and a plan that main has
+# moved past with anything other than documentation.
+#
+# GitHub's own gate for this is an environment with required reviewers, which
+# a private repository on the free plan doesn't have. A manual dispatch is the
+# substitute.
+
+name: apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: Which stack's plan to apply
+        required: true
+        type: choice
+        options:
+          - gcp
+          - databricks
+      plan_run_id:
+        description: Run id of the terraform workflow's push-to-main run to apply
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Same group as the plan on main, so a plan and an apply never overlap.
+concurrency:
+  group: terraform-refs/heads/main
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.15.9
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+  GCP_APPLY_SA: ${{ vars.GCP_APPLY_SA }}
+  # Used by the databricks stack only; the google provider ignores them.
+  DATABRICKS_AUTH_TYPE: github-oidc
+  DATABRICKS_HOST: https://accounts.gcp.databricks.com
+  DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+  DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+  TF_VAR_account_id: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+  TF_VAR_automation_client_id: ${{ vars.DATABRICKS_CLIENT_ID }}
+  STACK_DIR: ${{ inputs.stack == 'databricks' && 'databricks' || '.' }}
+  STACK_PREFIX: ${{ inputs.stack == 'databricks' && 'terraform/databricks' || 'terraform/test' }}
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/main' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      # Full history, to compare the plan's commit with this one.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Inputs go through env, never straight into the script. A plan is
+      # current if main has moved on by documentation only: those commits
+      # don't run terraform.yml, so they never get a plan of their own.
+      - name: Check the plan run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+        run: |
+          [[ "$PLAN_RUN_ID" =~ ^[0-9]+$ ]] || { echo "plan_run_id must be a number"; exit 1; }
+          run="$RUNNER_TEMP/run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" > "$run"
+          jq -e '
+            .path == ".github/workflows/terraform.yml"
+            and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "main"
+            and .conclusion == "success"' "$run" > /dev/null || {
+            echo "Run $PLAN_RUN_ID is not a successful push-to-main terraform run:"
+            jq '{path, event, head_branch, conclusion, head_sha}' "$run"
+            exit 1
+          }
+          plan_sha=$(jq -r .head_sha "$run")
+          git merge-base --is-ancestor "$plan_sha" "$GITHUB_SHA" || {
+            echo "The plan's commit $plan_sha is not on main's history at $GITHUB_SHA."; exit 1; }
+          changed=$(git diff --name-only "$plan_sha" "$GITHUB_SHA" -- . ':(exclude)docs/**' ':(exclude)*.md' ':(exclude)**/*.md')
+          [ -z "$changed" ] || {
+            echo "Main has changed since the plan's commit $plan_sha; apply the newer plan. Changed:"
+            echo "$changed"; exit 1; }
+
+      # The state bucket, and the header's Google token for the REST
+      # provider (databricks/rest.tf). The action masks the token.
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_SA }}
+          token_format: access_token
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: plan-${{ inputs.stack }}
+          path: ${{ env.STACK_DIR }}
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: init
+        working-directory: ${{ env.STACK_DIR }}
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${TF_STATE_BUCKET}"
+          -backend-config="prefix=${STACK_PREFIX}"
+
+      # Terraform itself also refuses a plan made against older state.
+      - name: apply
+        working-directory: ${{ env.STACK_DIR }}
+        env:
+          STACK: ${{ inputs.stack }}
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+          GCP_TOKEN: ${{ steps.gcp.outputs.access_token }}
+        run: |
+          echo "### apply: $STACK stack, plan from run $PLAN_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          # The Databricks stack's ephemeral variables, which a saved plan
+          # doesn't carry and its apply must be given again.
+          if [ "$STACK" = databricks ]; then
+            source ../.github/scripts/databricks-token.sh
+            export TF_VAR_databricks_token="$DBX_TOKEN" TF_VAR_gcp_access_token="$GCP_TOKEN"
+            unset DBX_TOKEN
+          fi
+          set +e
+          terraform apply -input=false -no-color plan.cache 2>&1 | tee apply.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "- $(date -u +%FT%TZ); exit code: $rc; $(terraform version | head -1)"
+            echo '```'
+            grep -E "Apply complete|Creation complete|Error|error" apply.log | head -30
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc

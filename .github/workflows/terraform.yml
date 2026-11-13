@@ -1,0 +1,220 @@
+# validate -> plan, on pull requests and on main.
+#
+# Two stacks, each with its own state: the GCP stack (the repository root)
+# and the Databricks account stack (databricks/). The workspace stack
+# (workspace/) has its own workflow, workspace.yml.
+#
+# Pull requests plan the GCP stack as gha-plan: read-only, and without a state
+# lock, since it cannot write the lock file. Pushes to main plan both stacks,
+# the GCP one as gha-apply, with the lock, and keep each plan as an artifact
+# (plan-gcp, plan-databricks) for apply.yml to replay.
+#
+# The Databricks stack plans on main only. Its principal's federation policy
+# trusts main alone, and Databricks has no read-only account admin role to
+# give a pull-request identity: a plan principal would be a second account
+# admin that any branch could use.
+#
+# A manual run (Run workflow, on main) plans the same way as a push; with
+# destroy ticked it plans the destruction of both stacks instead. Its plans
+# are artifacts like any other, applied with apply.yml: the Databricks stack
+# first, then the GCP stack.
+#
+# Identities and the state bucket come from bootstrap/, applied once by
+# administrators; its outputs are the repository variables read below. None
+# of them is a secret. Until they are set, the jobs that sign in are skipped.
+
+name: terraform
+
+# Documentation changes don't run Terraform.
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: Plan the destruction of both stacks
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.15.9
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_PREFIX: terraform/test
+  TF_VAR_FILE: envs/test.tfvars
+  GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+  GCP_APPLY_SA: ${{ vars.GCP_APPLY_SA }}
+  GCP_PLAN_SA: ${{ vars.GCP_PLAN_SA }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: validate
+        run: |
+          for d in . databricks workspace; do
+            terraform -chdir="$d" init -backend=false -input=false
+            terraform -chdir="$d" validate
+          done
+
+      # Misconfiguration scan, HIGH and CRITICAL only, pinned to a release
+      # rather than :latest.
+      - name: trivy
+        run: >
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.76.2
+          config --quiet --severity HIGH,CRITICAL --exit-code 1 /src
+
+  plan:
+    needs: validate
+    # Skipped until bootstrap/'s outputs are set as repository variables.
+    if: vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ github.event_name != 'pull_request' && env.GCP_APPLY_SA || env.GCP_PLAN_SA }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${TF_STATE_BUCKET}"
+          -backend-config="prefix=${TF_STATE_PREFIX}"
+
+      - name: plan
+        env:
+          LOCK: ${{ github.event_name != 'pull_request' }}
+          DESTROY: ${{ inputs.destroy && '-destroy' || '' }}
+        run: |
+          terraform plan -input=false -lock="$LOCK" $DESTROY -out=plan.cache -var-file="$TF_VAR_FILE"
+          terraform show -json plan.cache > plan.json
+          {
+            echo "### Plan (${{ github.event_name != 'pull_request' && 'gha-apply, replayable' || 'gha-plan, read-only' }}${{ inputs.destroy && ', DESTROY' || '' }})"
+            jq -r '([.resource_changes[]?.change.actions] | flatten) as $a
+              | "create \($a | map(select(. == "create")) | length), update \($a | map(select(. == "update")) | length), delete \($a | map(select(. == "delete")) | length)"' plan.json
+            echo '```'
+            terraform show -no-color plan.cache | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Only main's plan is meant to be applied. The lock file travels with it,
+      # so apply runs the providers the plan was made with.
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-gcp
+          path: |
+            plan.cache
+            .terraform.lock.hcl
+          retention-days: 7
+          if-no-files-found: error
+
+  # Google auth here is for the state bucket only; Databricks auth is the
+  # principal's federation (github-oidc), set in env.
+  plan-databricks:
+    if: github.event_name != 'pull_request' && vars.GCP_WIF_PROVIDER != ''
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: https://accounts.gcp.databricks.com
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      TF_VAR_account_id: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      TF_VAR_automation_client_id: ${{ vars.DATABRICKS_CLIENT_ID }}
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The state bucket, and the header's Google token for the REST
+      # provider (databricks/rest.tf). The action masks the token.
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_SA }}
+          token_format: access_token
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${TF_STATE_BUCKET}"
+          -backend-config="prefix=terraform/databricks"
+
+      # Both tokens are minted here and passed as ephemeral variables, which
+      # Terraform keeps out of plan.cache.
+      - name: plan
+        env:
+          GCP_TOKEN: ${{ steps.gcp.outputs.access_token }}
+          DESTROY: ${{ inputs.destroy && '-destroy' || '' }}
+        run: |
+          source ../.github/scripts/databricks-token.sh
+          export TF_VAR_databricks_token="$DBX_TOKEN" TF_VAR_gcp_access_token="$GCP_TOKEN"
+          unset DBX_TOKEN
+          terraform plan -input=false $DESTROY -out=plan.cache -var-file=envs/test.tfvars
+          terraform show -json plan.cache > plan.json
+          {
+            echo "### Databricks plan (github-oidc, replayable${{ inputs.destroy && ', DESTROY' || '' }})"
+            jq -r '([.resource_changes[]?.change.actions] | flatten) as $a
+              | "create \($a | map(select(. == "create")) | length), update \($a | map(select(. == "update")) | length), delete \($a | map(select(. == "delete")) | length)"' plan.json
+            echo '```'
+            terraform show -no-color plan.cache | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plan-databricks
+          path: |
+            databricks/plan.cache
+            databricks/.terraform.lock.hcl
+          retention-days: 7
+          if-no-files-found: error

@@ -1,0 +1,114 @@
+# Workspace-level Terraform (workspace/) for gha-test-psc, whose public access
+# is off, so it runs on the self-hosted runner in gha-test-fe-vpc (label
+# gha-test-fe), where the workspace URL resolves to the front-end endpoint.
+# Run by hand on main: plan, or plan and apply.
+#
+# The two-run pattern of terraform.yml and apply.yml (a reviewed plan,
+# replayed later) is cut to one run here: the dispatch itself is the gate,
+# and this is a test of the private path, not a second pipeline.
+
+name: workspace
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the plan in the same run
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.15.9
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+  GCP_APPLY_SA: ${{ vars.GCP_APPLY_SA }}
+  DATABRICKS_AUTH_TYPE: github-oidc
+  DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+
+jobs:
+  workspace:
+    if: github.ref == 'refs/heads/main' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: gha-test-fe
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: workspace
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only for the state bucket.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_SA }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: init
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${TF_STATE_BUCKET}"
+          -backend-config="prefix=terraform/workspace"
+
+      # What the runner sees, for the record: the workspace name from the
+      # front end's response policy, the account API from public DNS. The
+      # host comes from the account stack's state.
+      - name: network
+        run: |
+          # -plan: plain console evaluates against state, where the remote
+          # state isn't read yet on a stack's first run ("known after apply").
+          host=$(terraform console -plan -var-file=envs/test.tfvars <<<'data.terraform_remote_state.account.outputs.workspace_psc.url' | tr -d '"' | sed 's|https://||')
+          {
+            echo "### workspace: runner $(hostname), $(date -u +%FT%TZ)"
+            echo "- $host -> $(getent hosts "$host" | awk '{print $1}')"
+            echo "- accounts.gcp.databricks.com -> $(getent hosts accounts.gcp.databricks.com | awk '{print $1}' | head -1)"
+            echo "- GET https://$host/ -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$host/")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -out=plan.cache -var-file=envs/test.tfvars > plan.log 2>&1
+          rc=$?
+          set -e
+          cat plan.log
+          {
+            echo "- plan: exit code $rc; $(terraform version | head -1); databricks provider $(terraform version -json | jq -r '.provider_selections["registry.terraform.io/databricks/databricks"]')"
+            echo '```'
+            grep -E "No changes|Plan:|will be|has changed|Changes to Outputs|Error|error" plan.log | head -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: apply
+        if: inputs.apply
+        run: |
+          set +e
+          terraform apply -input=false -no-color plan.cache > apply.log 2>&1
+          rc=$?
+          set -e
+          cat apply.log
+          {
+            echo "- apply: exit code $rc"
+            echo '```'
+            grep -E "Apply complete|complete after|Error|error|cluster_policy_id" apply.log | head -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc

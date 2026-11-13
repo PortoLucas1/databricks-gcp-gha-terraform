@@ -1,0 +1,10 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+plan.cache
+plan.json
+crash.log
+override.tf
+*_override.tf
+# Written by google-github-actions/auth; never commit or upload it.
+gha-creds-*.json

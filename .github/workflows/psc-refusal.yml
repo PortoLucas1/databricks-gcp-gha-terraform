@@ -1,0 +1,105 @@
+# Is gha-test-psc refused from the internet, for an identity it would serve?
+#
+# Private access settings with public access off should refuse the workspace
+# to requests that don't come through a registered front-end endpoint. An
+# unauthenticated request can't show that (Databricks answers 303/401 first),
+# and a person's 403 is ambiguous if they aren't a member. The automation
+# principal is a workspace admin, so the same steps are run twice:
+#
+#   private:  the self-hosted runner in gha-test-fe-vpc, through the front-end
+#             endpoint. The control: it should succeed.
+#   internet: a GitHub-hosted runner, from the internet. Any refusal here is
+#             the network check, since the identity and the steps are the same.
+#
+# Each job finds the workspace URL through the account API, exchanges a GitHub
+# token at the workspace's own token endpoint, then calls the workspace API.
+# Only HTTP statuses and Databricks' error messages are shown, never a token.
+# Run by hand on main (the federation policy trusts main only).
+
+name: psc-refusal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABRICKS_HOST: https://accounts.gcp.databricks.com
+  DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+  DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+  WORKSPACE_NAME: gha-test-psc
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main' && vars.DATABRICKS_CLIENT_ID != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - path: private
+            runner: gha-test-fe
+          - path: internet
+            runner: ubuntu-24.04
+    name: ${{ matrix.path }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: workspace URL
+        id: ws
+        run: |
+          echo "### ${{ matrix.path }}: runner $(hostname)" >> "$GITHUB_STEP_SUMMARY"
+          source .github/scripts/databricks-token.sh
+          deployment=$(curl -sfS -H "Authorization: Bearer $DBX_TOKEN" \
+            "$DATABRICKS_HOST/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/workspaces" \
+            | jq -r --arg n "$WORKSPACE_NAME" '.[] | select(.workspace_name == $n) | .deployment_name')
+          unset DBX_TOKEN
+          [ -n "$deployment" ] || { echo "workspace $WORKSPACE_NAME not found" >&2; exit 1; }
+          host="$deployment.gcp.databricks.com"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "- $WORKSPACE_NAME resolves to $(getent hosts "$host" | awk '{print $1}' | head -1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: workspace token and API call
+        env:
+          HOST: ${{ steps.ws.outputs.host }}
+        run: |
+          gh_jwt=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${DATABRICKS_ACCOUNT_ID}" | jq -r .value)
+          echo "::add-mask::$gh_jwt"
+          resp=$(curl -sS --max-time 30 -w '\n%{http_code}' -X POST "https://$HOST/oidc/v1/token" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+            --data-urlencode "subject_token=$gh_jwt" \
+            --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
+            --data-urlencode "client_id=$DATABRICKS_CLIENT_ID" \
+            --data-urlencode "scope=all-apis")
+          unset gh_jwt
+          code=$(tail -n1 <<<"$resp"); body=$(head -n -1 <<<"$resp"); unset resp
+          token=$(jq -r '.access_token // empty' <<<"$body" 2>/dev/null)
+          [ -n "$token" ] && echo "::add-mask::$token"
+          {
+            echo "- workspace token exchange: HTTP $code"
+            if [ -z "$token" ]; then
+              echo '```'
+              jq -c 'del(.access_token, .refresh_token, .id_token)' <<<"$body" 2>/dev/null || head -c 500 <<<"$body"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          unset body
+          [ -n "$token" ] || exit 0
+
+          resp=$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $token" \
+            "https://$HOST/api/2.0/preview/scim/v2/Me")
+          unset token
+          code=$(tail -n1 <<<"$resp"); body=$(head -n -1 <<<"$resp"); unset resp
+          {
+            echo "- GET /api/2.0/preview/scim/v2/Me: HTTP $code"
+            echo '```'
+            jq -c 'if .error_code or .message then {error_code, message} else {displayName, active, groups: [.groups[]?.display]} end' <<<"$body" 2>/dev/null || head -c 500 <<<"$body"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

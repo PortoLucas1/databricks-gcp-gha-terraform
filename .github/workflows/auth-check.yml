@@ -1,0 +1,97 @@
+# Shows each hop of the pipeline's authentication, with no credential printed:
+#
+#   1. GitHub issues the job an OIDC token (permissions: id-token: write).
+#      Its claims are shown: the payload is decoded, the token itself never
+#      leaves the step.
+#   2. Google: google-github-actions/auth exchanges a GitHub token at the
+#      Security Token Service for the apply identity, through the pool's
+#      provider and the identity's workloadIdentityUser binding. tokeninfo
+#      shows whose access token came back.
+#   3. Databricks: a GitHub token with the account ID as its audience is
+#      exchanged at the account's token endpoint as the automation principal,
+#      through its federation policy; the principal then reads its own
+#      record from the account API.
+#
+# Run by hand on main (the Databricks policy trusts main only).
+
+name: auth-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  auth:
+    if: github.ref == 'refs/heads/main' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_HOST: https://accounts.gcp.databricks.com
+      DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The claims both Google's provider and Databricks' policy check. The
+      # audience here is the Databricks account ID; Google's action asks for
+      # its own token, with the provider's resource name as the audience.
+      - name: 1. GitHub OIDC token
+        run: |
+          jwt=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${DATABRICKS_ACCOUNT_ID}" | jq -r .value)
+          echo "::add-mask::$jwt"
+          payload=$(cut -d. -f2 <<<"$jwt" | tr '_-' '/+')
+          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+          {
+            echo "### 1. GitHub OIDC token (claims only)"
+            echo '```json'
+            base64 -d <<<"$payload" | jq '{iss, sub, aud, repository, repository_id, repository_owner, repository_owner_id, ref, event_name, runner_environment, job_workflow_ref, exp_in_seconds: (.exp - now | floor)}'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          unset jwt payload
+
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_APPLY_SA }}
+          token_format: access_token
+          # userinfo.email only so that tokeninfo names the identity; without
+          # it tokeninfo returns no email.
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/userinfo.email
+
+      - name: 2. Google identity
+        env:
+          GCP_TOKEN: ${{ steps.gcp.outputs.access_token }}
+          WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+        run: |
+          {
+            echo "### 2. Google"
+            echo "- workload identity provider: \`$WIF_PROVIDER\`"
+            echo "- access token belongs to:"
+            echo '```json'
+            curl -sfS -d "access_token=$GCP_TOKEN" https://oauth2.googleapis.com/tokeninfo \
+              | jq '{email, scope, expires_in}'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 3. Databricks identity
+        run: |
+          echo "### 3. Databricks" >> "$GITHUB_STEP_SUMMARY"
+          source .github/scripts/databricks-token.sh
+          {
+            echo "- service principal (application ID \`$DATABRICKS_CLIENT_ID\`), read with its own token:"
+            echo '```json'
+            curl -sfS -G -H "Authorization: Bearer $DBX_TOKEN" \
+              "$DATABRICKS_HOST/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/scim/v2/ServicePrincipals" \
+              --data-urlencode "filter=applicationId eq \"$DATABRICKS_CLIENT_ID\"" \
+              | jq '.Resources[0] | {displayName, applicationId, active, roles: [.roles[]?.value]}'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          unset DBX_TOKEN
