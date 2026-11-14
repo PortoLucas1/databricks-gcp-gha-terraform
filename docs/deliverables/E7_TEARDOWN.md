@@ -1,6 +1,21 @@
 # E7. Teardown record
 
-**2026-11-13.** Two teardowns: the first before the end-to-end rebuild, the final one after it. Every Terraform destroy was a reviewed plan from the pipeline, applied by hand.
+**2026-11-13.** Three teardowns: the first before the end-to-end rebuild, the second after it, and the use case's after the Entra SSO and AIM tests (2026-11-14). Every Terraform destroy was a reviewed plan from the pipeline, applied by hand.
+
+## Use case teardown, after the Entra SSO and AIM tests (2026-11-14)
+
+The second build, in a new project, with Entra SSO and AIM on the account ([USE_CASE_RESULTS.md](../USE_CASE_RESULTS.md)). Same order as the final teardown below, plus the identities AIM brought in.
+
+| # | Step | Result |
+|---|---|---|
+| 1 | `terraform` run with **destroy**; `apply`, account stack | **16 destroyed**: the 15 of the build plus the Entra group's workspace assignment. Both workspaces gone |
+| 2 | By hand (R10) | The two `db-<vpc>-<region>-ingress` firewall rules and the six workspace buckets |
+| 3 | `apply`, GCP stack, same destroy run | Everything destroyed; the project held only the state bucket |
+| 4 | Entra test objects (with `az`) | Three users, two groups, the Entra app registration of the U7 pipeline principal. The tenant's MFA exclusion group lost its test members with them. **The synced principal was gone from the Databricks account**, with its federation policy, right after its Entra app was deleted, without being deleted there. The users and the group were still in the account |
+| 5 | Databricks test identities (CLI) | The three users AIM created at first sign-in and the Entra group added to the account: deleted. They stay in the account after a workspace and the Entra objects are gone, so they need removing |
+| 6 | `bootstrap/` destroyed (after emptying the state bucket) | 20 destroyed; **the automation principal deleted outright**, not deactivated (R14's fix) |
+| 7 | The project retired by the organization's infrastructure Terraform (two changes, as for the first project) | DRS policies and the plan identity's reads off, the project set to `DELETE`, then the project deleted and the single-project DRS constraint removed. Recoverable for 30 days |
+| 8 | The account's SSO back to the identity provider it had before the test | Done by the account admins: the previous identity provider, with AIM re-enabled, as before the test |
 
 ## Final teardown, after the rebuild
 

@@ -39,3 +39,13 @@ variable "databricks_profile" {
   description = "Databricks CLI profile on the account console, for the person running this."
   type        = string
 }
+
+# Use case test U0 only: lets the first design's sign-in be tried (first-design/).
+# true makes the apply identity a Databricks account admin and lets it mint
+# Google ID tokens as itself; with own-IdP SSO the account should still refuse
+# it. Set back to false, and apply, as soon as the test is done.
+variable "first_design_test" {
+  description = "Enable the first-design sign-in test (U0). Keep false otherwise."
+  type        = bool
+  default     = false
+}

@@ -18,6 +18,11 @@ name: auth-check
 
 on:
   workflow_dispatch:
+    inputs:
+      client_id:
+        description: Application ID to sign in to Databricks as (blank = the DATABRICKS_CLIENT_ID variable). Use case U7 uses an Entra service principal synced by AIM
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -32,7 +37,7 @@ jobs:
     env:
       DATABRICKS_HOST: https://accounts.gcp.databricks.com
       DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
-      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_ID: ${{ inputs.client_id || vars.DATABRICKS_CLIENT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -1,0 +1,93 @@
+# Use case tests U3 and U5: what AIM put in the account, as the pipeline sees
+# it. Read only, as the automation principal (account admin):
+#
+#   - each named group: found through the account SCIM API or not (AIM
+#     doesn't expose groups that weren't added to the account directly, such
+#     as a group nested inside one that was), its member count, and whether
+#     it came from the IdP (externalId set);
+#   - the workspace's permission assignments: which principals have access,
+#     with what;
+#   - the test users (display name prefix): active or not.
+#
+# The summary carries display names, counts and states, no IDs or emails.
+# Run by hand on main (the federation policy trusts main only).
+
+name: aim-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: Group display names, comma-separated
+        required: true
+        default: dbx-uc-test-group,dbx-uc-test-nested
+      user_prefix:
+        description: Display name prefix of the test users
+        required: true
+        default: dbx-uc-test
+      workspace:
+        description: Workspace name
+        required: true
+        default: gha-test-psc
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main' && vars.DATABRICKS_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_HOST: https://accounts.gcp.databricks.com
+      DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      GROUP_NAMES: ${{ inputs.groups }}
+      USER_PREFIX: ${{ inputs.user_prefix }}
+      WORKSPACE_NAME: ${{ inputs.workspace }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: read the account
+        run: |
+          echo "### aim-check" >> "$GITHUB_STEP_SUMMARY"
+          source .github/scripts/databricks-token.sh
+          api="$DATABRICKS_HOST/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID"
+          get() { curl -sfS -G -H "Authorization: Bearer $DBX_TOKEN" "$@"; }
+
+          {
+            echo "#### Groups"
+            echo "| Group | Found through the API | Members | From the IdP |"
+            echo "|---|---|---|---|"
+            IFS=',' read -ra names <<<"$GROUP_NAMES"
+            for name in "${names[@]}"; do
+              name=$(xargs <<<"$name")
+              get "$api/scim/v2/Groups" --data-urlencode "filter=displayName eq \"$name\"" \
+                | jq -r --arg n "$name" '.Resources[0] as $g
+                    | if $g then "| \($n) | yes | \($g.members // [] | length) | \(if $g.externalId then "yes" else "no" end) |"
+                      else "| \($n) | **no** | | |" end'
+            done
+
+            echo "#### Workspace access: $WORKSPACE_NAME"
+            ws=$(get "$api/workspaces" | jq -r --arg n "$WORKSPACE_NAME" '.[] | select(.workspace_name == $n) | .workspace_id')
+            if [ -n "$ws" ]; then
+              echo "| Principal | Kind | Permissions |"
+              echo "|---|---|---|"
+              get "$api/workspaces/$ws/permissionassignments" \
+                | jq -r '.permission_assignments[]? | .principal as $p
+                    | "| \($p.display_name // "?") | \(if $p.group_name then "group" elif $p.service_principal_name then "service principal" else "user" end) | \(.permissions | join(", ")) |"'
+            else
+              echo "Workspace not found."
+            fi
+
+            echo "#### Test users (display name starts with \`$USER_PREFIX\`)"
+            echo "| User | Active |"
+            echo "|---|---|"
+            get "$api/scim/v2/Users" --data-urlencode "count=1000" \
+              | jq -r --arg p "$USER_PREFIX" '.Resources[]? | select((.displayName // "") | startswith($p)) | "| \(.displayName) | \(.active) |"'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          unset DBX_TOKEN

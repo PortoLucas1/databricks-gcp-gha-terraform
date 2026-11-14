@@ -142,3 +142,14 @@ resource "google_storage_bucket_iam_member" "plan_state_read" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.plan.email}"
 }
+
+# U0 only (var.first_design_test): the provider's google_service_account path
+# mints an ID token as the apply identity, using the apply identity's own
+# federated credentials, so it needs token creator on itself.
+resource "google_service_account_iam_member" "apply_self_token_creator" {
+  count = var.first_design_test ? 1 : 0
+
+  service_account_id = google_service_account.apply.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.apply.email}"
+}

@@ -1,6 +1,6 @@
-# E6. Configuration guide: Databricks on GCP from GitHub Actions with Terraform, own-IdP SSO, Private Service Connect
+# E6. Configuration guide: Databricks on GCP from GitHub Actions with Terraform, own-IdP SSO (Entra ID and AIM), Private Service Connect
 
-**2026-11-13, verified by an end-to-end rebuild.** End to end, in build order. The reference implementation (E5) is the lab repository; file names below refer to it. Placeholders: `<org-id>`, `<ci-project>`, `<ws-project>`, `<account-id>`, `<owner>`, `<owner-id>`, `<repo>`, `<repo-id>`, `<region>`.
+**2026-11-14, verified by an end-to-end rebuild and on Entra SSO with AIM.** End to end, in build order. The reference implementation (E5) is the lab repository; file names below refer to it. Placeholders: `<org-id>`, `<ci-project>`, `<ws-project>`, `<account-id>`, `<owner>`, `<owner-id>`, `<repo>`, `<repo-id>`, `<region>`.
 
 ## 0. Architecture
 
@@ -71,6 +71,11 @@ Items 1, 4 and 5 are one Terraform root, `bootstrap/`, applied locally by GCP an
    - subject **`repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:refs/heads/main`**: GitHub issues the immutable-ID form; copy it from a first run's `TOKEN_SUBJECT_INVALID` error rather than typing it (R1). On a paid plan, prefer an environment subject with required reviewers;
    - audience: the default, the account ID.
 5. **Repository variables** (not secrets; nothing here is secret), from `bootstrap/`'s outputs: `GCP_WIF_PROVIDER`, `GCP_APPLY_SA`, `GCP_PLAN_SA`, `TF_STATE_BUCKET`, `DATABRICKS_ACCOUNT_ID`, `DATABRICKS_CLIENT_ID` (the principal's application ID). Then run `auth-check`, which shows each hop of the chain without printing a credential.
+6. **Entra SSO and AIM** (when people come from Entra; [Databricks: automatic identity management](https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management)):
+   - Entra SSO for the account, then AIM on the **same tenant** (AIM requires it); Premium or Enterprise tier; identity-federated workspaces (new workspaces with a Unity Catalog metastore are).
+   - Add each Entra group that should reach a workspace to the account from Entra (account console). Until then Terraform can't see it (R17).
+   - Tenant policies apply to Databricks sign-in: a policy requiring MFA registration stops new or test users at Entra until they register or are excluded.
+   - The pipeline's principal is unaffected by both (U1); nothing in steps 1–5 changes.
 
 ## 2. Pipeline
 
@@ -138,7 +143,59 @@ Once public access is off, workspace-level Terraform runs inside the users' netw
 - **Clusters:** set an access mode (dedicated or standard), or a Unity Catalog workspace refuses them (R9).
 - **Workspace URL** from the account stack's state (`terraform_remote_state`), not copied. A script that needs it before the stack's first apply reads it with `terraform console -plan` (R13).
 
-## 6. Verification
+## 6. People and groups from Entra (AIM)
+
+With Entra SSO and AIM, workspace access follows Entra groups. Two Terraform objects per group, in two stacks, both needed (R18):
+
+```hcl
+# databricks/ (account stack): assign the group to the workspace
+data "databricks_group" "workspace" {
+  for_each     = var.workspace_groups             # { "<entra-group>" = ["USER"] }
+  display_name = each.key
+}
+
+resource "databricks_mws_permission_assignment" "group" {
+  for_each     = var.workspace_groups
+  workspace_id = <workspace id>
+  principal_id = tonumber(data.databricks_group.workspace[each.key].id)
+  permissions  = each.value
+}
+
+# workspace/ (workspace stack, on the self-hosted runner): give it an entitlement
+data "databricks_group" "entitled" {
+  for_each     = var.group_entitlements           # { "<entra-group>" = { workspace_access = true } }
+  display_name = each.key
+}
+
+resource "databricks_entitlements" "group" {
+  for_each              = var.group_entitlements
+  group_id              = data.databricks_group.entitled[each.key].id
+  workspace_access      = each.value.workspace_access ? true : null
+  databricks_sql_access = each.value.databricks_sql_access ? true : null
+  workspace_consume     = each.value.workspace_consume ? true : null
+}
+```
+
+- **Order:** add the group from Entra; apply the account stack (assignment); apply the workspace stack (entitlement). An assignment alone lets members reach the workspace and then refuses them: "not assigned or no Workspace access entitlement" (R18). In a new workspace the built-in `users` group carries no entitlement to fall back on.
+- **Entitlements unset unless true:** the provider refuses `workspace_consume` next to `workspace_access` or `databricks_sql_access`, even when one of them is `false`.
+- **Nested groups:** members of a group nested inside an assigned group get access, but the nested group itself isn't visible to the API or Terraform (R17). Assign the parent.
+- **Users** are created at first sign-in and linked to Entra a few minutes later; nothing to manage in Terraform.
+- **Private sign-in:** with public access off, people reach the workspace only through the front-end endpoint (their network's DNS to it); from the internet they are refused after signing in (U4). To test it from outside the network, a browser on an SSH SOCKS proxy through a VM in the users' network, with DNS resolved on the VM's side, shows the private path.
+- **Leavers:** disable in Entra (sign-in stops at once) and revoke personal access tokens and sessions in Databricks: the Databricks user isn't deactivated straight away (R19).
+- **The Entra groups themselves** (and nesting) as Terraform: [`examples/entra/`](../../examples/entra/) (`groups.tf`).
+
+## 7. Optional: the pipeline's identity from Entra (option C)
+
+If the pipeline's Databricks identity must be owned in Entra ([AIM assessment](../AIM_ENTRA_ASSESSMENT.md)); proven at account level (R16), not yet through a full build:
+
+1. An Entra app registration with no secret and no API permissions, and its service principal.
+2. Add it to the account from Entra (account console). Its Databricks application ID is the Entra client ID.
+3. Give it account admin, and a service principal federation policy with the same issuer and immutable-ID subject as step 1.4. With the Databricks CLI on Windows PowerShell 5.1, pass JSON bodies as `--json @file`: inline JSON is mangled.
+4. Set `DATABRICKS_CLIENT_ID` to its application ID; `auth-check` (with `client_id`) shows it signing in.
+
+Terraform can't create this principal in Databricks; it can manage it by application ID once provisioned. [`examples/entra/`](../../examples/entra/) (`pipeline_principal.tf`) does steps 1 and 3 as Terraform, with the provisioning step between two applies; it also holds an untested option B. The Google side (the apply identity and the header) is unchanged.
+
+## 8. Verification
 
 | Check | Expect | In the lab's rebuild |
 |---|---|---|
@@ -148,7 +205,12 @@ Once public access is off, workspace-level Terraform runs inside the users' netw
 | From the users' network | The workspace URL resolves to the front-end endpoint; `accounts.gcp.databricks.com` resolves publicly; the workspace answers | As expected; `GET /` 303 |
 | From the internet, as a workspace member (`psc-refusal`) | Refused at the API; the same identity through the front end succeeds (an unauthenticated request can't show this, R8) | `403` "Unauthorized network access to workspace" from the internet, `200` through the front end (R12) |
 | Every stack | The next plan shows no changes | GCP and account: no changes; workspace: no resource changes |
+| With Entra SSO and AIM: the pipeline | `auth-check` passes after each change | Passed (U1) |
+| With Entra SSO and AIM: groups | `aim-check`: the group found, the workspace assignment listed; `workspace-identity-check`: the group on a member's workspace record, with its entitlement | As expected (U3, U4) |
+| With Entra SSO and AIM: people, through the front end | A direct member and a nested member reach the workspace; someone in neither group is refused | As expected (U4) |
+| With Entra SSO and AIM: people, from the internet | Refused after signing in | As expected (U4) |
+| A person disabled in Entra | Refused at Entra's sign-in; `auth-check` passes | As expected; the Databricks user still `active` minutes later (U5, R19) |
 
-## 7. Teardown
+## 9. Teardown
 
-Workspace stack, then account stack, then GCP stack, each a reviewed `plan -destroy` applied by hand; apply only the newest destroy run (another apply in between makes it stale). In the account stack, workspaces go first (polled until 404), then their network configurations and registrations. **Between the account and GCP stacks, delete what Databricks left in the project** (R10): the `db-<vpc>-<region>-ingress` firewall rule on each workspace VPC, which blocks deleting the VPC, and by decision the workspace buckets. The organization's DRS exception and the principal are removed by their owners afterwards. See [E7](E7_TEARDOWN.md).
+Mind the account's daily workspace creation limit (R15) before tearing down and rebuilding on the same day. Workspace stack, then account stack, then GCP stack, each a reviewed `plan -destroy` applied by hand; apply only the newest destroy run (another apply in between makes it stale). In the account stack, workspaces go first (polled until 404), then their network configurations and registrations. **Between the account and GCP stacks, delete what Databricks left in the project** (R10): the `db-<vpc>-<region>-ingress` firewall rule on each workspace VPC, which blocks deleting the VPC, and by decision the workspace buckets. The organization's DRS exception and the principal are removed by their owners afterwards. With AIM, also remove the groups and principals added from Entra (and any users it created) from the account; they stay after a workspace is deleted. See [E7](E7_TEARDOWN.md).

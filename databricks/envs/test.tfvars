@@ -25,3 +25,10 @@ psc = {
   frontend_endpoint = "psc-fe-plproxy-usc1"
   public_access     = false
 }
+
+# Workspace access for Entra groups that AIM provisioned (added to the account
+# from Entra first; see examples/entra). Pair each with group_entitlements in
+# workspace/envs (R18). Used in the use case test U3:
+# workspace_groups = {
+#   "<entra-group>" = ["USER"]
+# }

@@ -94,6 +94,14 @@ jobs:
             echo '```'
             grep -E "No changes|Plan:|will be|has changed|Changes to Outputs|Error|error" plan.log | head -20
             echo '```'
+            if [ "$rc" -ne 0 ]; then
+              # The API's explanation follows the Error: line (R15: a 429's
+              # body names the account's daily workspace creation limit).
+              echo "Error details:"
+              echo '```'
+              awk '/^Error:/{p=1} p' plan.log | head -40
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit $rc
 
@@ -110,5 +118,13 @@ jobs:
             echo '```'
             grep -E "Apply complete|complete after|Error|error|cluster_policy_id" apply.log | head -20
             echo '```'
+            if [ "$rc" -ne 0 ]; then
+              # The API's explanation follows the Error: line (R15: a 429's
+              # body names the account's daily workspace creation limit).
+              echo "Error details:"
+              echo '```'
+              awk '/^Error:/{p=1} p' apply.log | head -40
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit $rc

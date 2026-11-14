@@ -1,0 +1,96 @@
+# Use case test U4 diagnosis: how the workspace itself sees a person who was
+# refused ("not assigned to the workspace or no Workspace access
+# entitlement"). Read only, from the self-hosted runner (the workspace's
+# public access is off), as the automation principal, a workspace admin:
+#
+#   - the user: known to the workspace or not, its groups, its direct
+#     entitlements;
+#   - each named group: known or not, members, entitlements;
+#   - the built-in users group's entitlements, which assigned principals
+#     normally get Workspace access from.
+#
+# Names, counts and entitlement values only, no IDs. Run by hand on main.
+
+name: workspace-identity-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      user:
+        description: User name (email) to look up
+        required: true
+        default: user@example.com
+      groups:
+        description: Group display names, comma-separated
+        required: true
+        default: dbx-uc-test-group,dbx-uc-test-nested,users
+      workspace:
+        description: Workspace name
+        required: true
+        default: gha-test-psc
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main' && vars.DATABRICKS_CLIENT_ID != ''
+    runs-on: gha-test-fe
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_HOST: https://accounts.gcp.databricks.com
+      DATABRICKS_ACCOUNT_ID: ${{ vars.DATABRICKS_ACCOUNT_ID }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      LOOKUP_USER: ${{ inputs.user }}
+      GROUP_NAMES: ${{ inputs.groups }}
+      WORKSPACE_NAME: ${{ inputs.workspace }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: read the workspace
+        run: |
+          echo "### workspace-identity-check: $WORKSPACE_NAME" >> "$GITHUB_STEP_SUMMARY"
+          source .github/scripts/databricks-token.sh
+          deployment=$(curl -sfS -H "Authorization: Bearer $DBX_TOKEN" \
+            "$DATABRICKS_HOST/api/2.0/accounts/$DATABRICKS_ACCOUNT_ID/workspaces" \
+            | jq -r --arg n "$WORKSPACE_NAME" '.[] | select(.workspace_name == $n) | .deployment_name')
+          unset DBX_TOKEN
+          host="https://$deployment.gcp.databricks.com"
+
+          # Workspace token: the same GitHub token exchange, at the workspace.
+          gh_jwt=$(curl -sfS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${DATABRICKS_ACCOUNT_ID}" | jq -r .value)
+          echo "::add-mask::$gh_jwt"
+          token=$(curl -sfS -X POST "$host/oidc/v1/token" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+            --data-urlencode "subject_token=$gh_jwt" \
+            --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
+            --data-urlencode "client_id=$DATABRICKS_CLIENT_ID" \
+            --data-urlencode "scope=all-apis" | jq -r .access_token)
+          unset gh_jwt
+          echo "::add-mask::$token"
+          scim="$host/api/2.0/preview/scim/v2"
+          get() { curl -sS -G -H "Authorization: Bearer $token" "$@"; }
+
+          {
+            echo "#### User \`$LOOKUP_USER\`"
+            echo '```'
+            get "$scim/Users" --data-urlencode "filter=userName eq \"$LOOKUP_USER\"" \
+              | jq -c '.Resources[0] // "not known to the workspace" | if type == "object" then {active, groups: [.groups[]?.display], entitlements: [.entitlements[]?.value], from_idp: (.externalId != null)} else . end'
+            echo '```'
+            echo "#### Groups"
+            IFS=',' read -ra names <<<"$GROUP_NAMES"
+            for name in "${names[@]}"; do
+              name=$(xargs <<<"$name")
+              echo "- **$name**:"
+              echo '```'
+              get "$scim/Groups" --data-urlencode "filter=displayName eq \"$name\"" \
+                | jq -c '.Resources[0] // "not known to the workspace" | if type == "object" then {members: (.members // [] | length), member_names: [.members[]?.display][:10], entitlements: [.entitlements[]?.value], from_idp: (.externalId != null)} else . end'
+              echo '```'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          unset token

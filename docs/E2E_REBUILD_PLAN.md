@@ -50,7 +50,7 @@ Not torn down: the CI project and its identities, the DRS exception and profile 
 | 4 | Register the runner (person) | Runner online, label `gha-test-fe` |
 | 5 | `workspace` with apply | Cluster policy; cluster `RUNNING` in the back-end PSC VPC |
 | 6 | Plans again for every stack | **No changes** |
-| 7 | Checks | As E6 §6; the refusal from the internet, as the automation principal from a GitHub-hosted runner (a member of the workspace), settles the open item |
+| 7 | Checks | As E6 §8; the refusal from the internet, as the automation principal from a GitHub-hosted runner (a member of the workspace), settles the open item |
 | 8 | Scale down | Runner VM and NAT off; the cluster auto-terminates |
 
 ## 4. Cost

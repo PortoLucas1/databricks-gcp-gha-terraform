@@ -38,3 +38,20 @@ resource "databricks_service_principal_federation_policy" "github_main" {
     subject = "repo:${var.github.owner}@${var.github.owner_id}/${var.github.repository}@${var.github.repository_id}:ref:refs/heads/main"
   }
 }
+
+# U0 only (var.first_design_test): the first design's Databricks identity, the
+# apply identity's Google service account as an account admin user.
+resource "databricks_user" "first_design" {
+  count = var.first_design_test ? 1 : 0
+
+  user_name                = google_service_account.apply.email
+  display_name             = "first-design test (U0)"
+  disable_as_user_deletion = false
+}
+
+resource "databricks_user_role" "first_design_admin" {
+  count = var.first_design_test ? 1 : 0
+
+  user_id = databricks_user.first_design[0].id
+  role    = "account_admin"
+}

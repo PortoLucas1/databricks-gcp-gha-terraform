@@ -148,5 +148,13 @@ jobs:
             echo '```'
             grep -E "Apply complete|Creation complete|Error|error" apply.log | head -30
             echo '```'
+            if [ "$rc" -ne 0 ]; then
+              # The API's explanation follows the Error: line (R15: a 429's
+              # body names the account's daily workspace creation limit).
+              echo "Error details:"
+              echo '```'
+              awk '/^Error:/{p=1} p' apply.log | head -40
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit $rc

@@ -47,7 +47,7 @@ Merge to `main`. **The first plan has to run on `main`**: with an empty state bu
 Each apply is the `apply` workflow (Actions → apply → Run workflow), given the stack and the ID of the `terraform` run whose plan it replays. Check each plan's summary first.
 
 1. **GCP stack** (create 24 with the runner off): three VPCs, the PSC endpoints, the private zone and the response policy.
-2. **Account stack** (create 15): endpoint registrations, network configurations, private access settings, both workspaces through the REST provider (several minutes each), the principal's workspace assignment, and each workspace's DNS names.
+2. **Account stack** (create 15): endpoint registrations, network configurations, private access settings, both workspaces through the REST provider (several minutes each), the principal's workspace assignment, and each workspace's DNS names. The account has a daily limit on workspace creation (R15): if the apply fails with `429` `RESOURCE_EXHAUSTED`, wait until the window clears, then apply a fresh plan, which holds only what's missing.
 3. Check: the three forwarding rules `ACCEPTED`; both workspaces `RUNNING`.
 
 ## 4. Workspace level, through the front end
