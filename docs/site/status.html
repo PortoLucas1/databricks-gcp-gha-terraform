@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body style="margin:0">
+<title>Entra GHA Test Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: a technical dossier. Sticky contents rail on wide screens, one reading column (tables and diagrams scroll inside their own frames). */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #5a6776;
+  --line: #d8dee5;
+  --line-strong: #8d99a6;
+  --accent: #0e6b70;          /* Google side, links */
+  --accent-soft: #e2f0f0;
+  --dbx: #a8501a;             /* Databricks side */
+  --dbx-soft: #f8ebe2;
+  --refuse: #b42318;
+  --refuse-soft: #fbe9e7;
+  --ok: #1d7a3e;
+  --code-bg: #eef1f4;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #161d24; --ink: #e3e8ee; --muted: #94a1af; --line: #283340; --line-strong: #6d7a88;
+    --accent: #4fb1b6; --accent-soft: #153033; --dbx: #e2905a; --dbx-soft: #33231a; --refuse: #f0776b; --refuse-soft: #3a1d1b;
+    --ok: #5cc07e; --code-bg: #1d2630; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #161d24; --ink: #e3e8ee; --muted: #94a1af; --line: #283340; --line-strong: #6d7a88;
+  --accent: #4fb1b6; --accent-soft: #153033; --dbx: #e2905a; --dbx-soft: #33231a; --refuse: #f0776b; --refuse-soft: #3a1d1b;
+  --ok: #5cc07e; --code-bg: #1d2630; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font: 0.86em/1.4 var(--f-mono); background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+strong { font-weight: 600; }
+
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 960px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; } .rail { display: none; } }
+
+/* masthead */
+.mast { max-width: 1240px; margin: 0 auto; padding-block: 48px 32px; border-bottom: 1px solid var(--line); margin-bottom: 40px; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.eyebrow b { color: var(--ok); font-weight: 500; }
+h1 { font: 600 clamp(32px, 5vw, 50px)/1.05 var(--f-display); letter-spacing: -0.01em; margin: 16px 0 14px; text-wrap: balance; }
+.lede { max-width: 68ch; font-size: 17px; color: var(--muted); margin: 0; }
+.lede strong { color: var(--ink); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 28px; }
+.fact { background: var(--surface); padding: 16px 18px; min-width: 0; }
+.fact .k { font: 600 19px/1.2 var(--f-display); display: block; margin-bottom: 4px; }
+.fact .v { font-size: 13.5px; color: var(--muted); }
+.fact.g .k { color: var(--accent); } .fact.d .k { color: var(--dbx); } .fact.x .k { color: var(--refuse); }
+
+/* contents rail */
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; }
+.rail h3 { font: 500 11px/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.rail ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+.rail li a { display: flex; gap: 10px; padding: 7px 0 7px 14px; margin-left: -1px; border-left: 2px solid transparent; color: var(--ink); text-decoration: none; font-size: 14px; line-height: 1.3; }
+.rail li a span { font: 500 12px/1.5 var(--f-mono); color: var(--muted); min-width: 22px; }
+.rail li a:hover { border-left-color: var(--accent); color: var(--accent); }
+.rail .note { font-size: 12.5px; color: var(--muted); margin-top: 20px; line-height: 1.5; }
+
+/* documents */
+main { min-width: 0; }
+.doc { padding-bottom: 40px; margin-bottom: 40px; border-bottom: 1px solid var(--line); }
+.doc:last-child { border-bottom: 0; }
+.doc-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+.code-tag { font: 500 13px/1 var(--f-mono); color: var(--surface); background: var(--ink); padding: 5px 7px; border-radius: 4px; flex: none; }
+.doc h2 { font: 600 clamp(24px, 3.2vw, 32px)/1.15 var(--f-display); margin: 0; text-wrap: balance; }
+.doc h3 { font: 600 20px/1.25 var(--f-display); margin: 34px 0 10px; text-wrap: balance; }
+.doc h4 { font: 600 16px/1.3 var(--f-body); margin: 24px 0 8px; }
+.doc p, .doc li { max-width: 74ch; }
+.doc p { margin: 10px 0; }
+.doc ul, .doc ol { padding-left: 22px; margin: 10px 0; }
+.doc li { margin: 5px 0; }
+.doc li > p { margin: 4px 0; }
+.doc li > ul, .doc li > ol { margin: 4px 0; }
+
+.tbl { overflow-x: auto; margin: 14px 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.5; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font: 600 12px/1.3 var(--f-body); letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; min-width: 9em; }
+td { min-width: 7em; }
+pre.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 12px 0 16px; }
+pre.code code { background: none; padding: 0; font-size: 13px; line-height: 1.55; overflow-wrap: normal; }
+
+/* figures */
+.fig { margin: 22px 0 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; }
+.fig .scroll { overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 760px; height: auto; font-family: var(--f-body); }
+.fig figcaption { font-size: 13.5px; color: var(--muted); margin-top: 12px; max-width: 90ch; }
+.fig figcaption strong { color: var(--ink); }
+svg .t { fill: var(--ink); font-size: 12.5px; }
+svg .t.strong { font-weight: 600; }
+svg .t.small { font-size: 11px; }
+svg .t.muted { fill: var(--muted); }
+svg .t.label { font: 500 10.5px var(--f-mono); letter-spacing: 0.08em; fill: var(--muted); }
+svg .gtext { fill: var(--accent); } svg .dtext { fill: var(--dbx); } svg .xtext { fill: var(--refuse); font-weight: 600; }
+svg .zone { fill: none; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 4; }
+svg .zone.g { stroke: var(--accent); } svg .zone.d { stroke: var(--dbx); }
+svg .sub { fill: var(--accent-soft); stroke: none; opacity: 0.55; }
+svg .sub2 { fill: var(--surface); stroke: var(--line); }
+svg .node { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+svg .node.g { stroke: var(--accent); } svg .node.d { stroke: var(--dbx); fill: var(--dbx-soft); }
+svg .node.x { stroke: var(--refuse); fill: var(--refuse-soft); }
+svg .flow { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+svg .flow.g { stroke: var(--accent); } svg .flow.d { stroke: var(--dbx); }
+svg .flow.x { stroke: var(--refuse); stroke-dasharray: 6 5; }
+svg .flow.dash { stroke-dasharray: 3 3; stroke: var(--muted); }
+svg .flow.reply { stroke-dasharray: 5 4; stroke: var(--muted); }
+svg .ah { fill: var(--ink); } svg .ah-g { fill: var(--accent); } svg .ah-d { fill: var(--dbx); } svg .ah-x { fill: var(--refuse); }
+svg .life { stroke: var(--line-strong); stroke-dasharray: 2 4; }
+svg .band { fill: var(--bg); stroke: var(--line); }
+svg .tag { stroke-width: 1; }
+svg .tag.g { fill: var(--accent-soft); stroke: var(--accent); } svg .tag.d { fill: var(--dbx-soft); stroke: var(--dbx); }
+
+.foot { max-width: 1240px; margin: 0 auto; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style>.single { max-width: 960px; margin: 0 auto; }
+pre.mermaid { background: none; border: 0; margin: 0; min-width: 720px; text-align: center; }</style>
+<header class="mast single">
+  <div class="eyebrow"><span>Test status</span><span>Databricks on Google Cloud · GitHub Actions · Microsoft Entra ID</span><span><b>Complete, 2026-11-14</b></span></div>
+  <h1>Entra ID with GitHub Actions on Databricks on GCP: test status</h1>
+</header>
+<main class="single"><section class="doc"><p><strong>Status, 2026-11-14: testing complete.</strong> Tested on a Databricks on GCP account with <strong>Microsoft Entra ID single sign-on and automatic identity management (AIM) turned on</strong>, with the lab's GitHub Actions and Terraform pipeline. Two questions: can people use Entra while the pipeline keeps working, and can the pipeline's own identity come from Entra?</p><h3>Where it stands</h3><div class="tbl"><table><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody><tr><td>People sign in through Entra and come from Entra through AIM, while GitHub Actions builds workspaces with Terraform</td><td><strong>Viable, proven end to end.</strong> The pipeline is unaffected by Entra SSO and AIM and built the whole private deployment with both on. People sign in through Entra over Private Service Connect and get workspace access from their Entra groups, nested groups included; others are refused</td></tr><tr><td>The pipeline's own Databricks identity comes from Entra (an Entra service principal synced by AIM)</td><td><strong>Viable.</strong> Proven at account level: a GitHub Actions job signs in as the Entra principal, as account admin, without a secret. Not run through a full build</td></tr><tr><td>The original design: the Databricks provider signing in as a Google service account</td><td><strong>Doesn't work with Entra SSO.</strong> The account refuses it, even for an account admin</td></tr></tbody></table></div><h3>Tested</h3><div class="tbl"><table><thead><tr><th>Test</th><th>Result</th></tr></thead><tbody><tr><td>Original design with Entra SSO on: the provider's <code>google_service_account</code> sign-in</td><td><strong>Refused</strong> ("Invalid Request") for a Google service account that is an account admin. Own-IdP SSO turns off Google ID token sign-in for the whole account</td></tr><tr><td>The pipeline's sign-in after switching SSO to Entra, and again after turning on AIM</td><td><strong>Unaffected</strong>: GitHub token exchanged for the pipeline's Databricks service principal, account admin</td></tr><tr><td>The full private build with Entra SSO and AIM on: both workspaces, back-end and front-end Private Service Connect, a cluster, workspace-level Terraform</td><td><strong>Works</strong>, with the same results as the earlier lab. The cluster started through the back-end endpoints only; the workspace refused the pipeline's own principal from the internet and served it through the front end</td></tr><tr><td>An Entra group, provisioned by AIM, given workspace access by Terraform</td><td><strong>Works</strong> once Terraform both assigns the group and gives it an entitlement in the workspace (Workspace access); assignment alone isn't enough</td></tr><tr><td>People signing in through Entra, privately</td><td>A direct group member and a member of a <strong>nested</strong> group both reached the workspace; a user in neither was refused. A member signing in from the internet was refused by the workspace</td></tr><tr><td>Disabling a person in Entra</td><td><strong>Blocked at Entra's sign-in; the pipeline unaffected.</strong> The Databricks user record still read active minutes later</td></tr><tr><td>An Entra service principal synced by AIM as the pipeline's identity</td><td>Its Databricks application ID <strong>is</strong> its Entra client ID; it <strong>can</strong> hold account admin; it <strong>can</strong> carry its own federation policy, and a GitHub Actions job <strong>signed in as it</strong> with no secret</td></tr></tbody></table></div><h3>Not run</h3><div class="tbl"><table><thead><tr><th>Test</th><th>Why</th></tr></thead><tbody><tr><td>The Entra principal through a full build</td><td>The account-level result answers the question; a build with it is the step before adopting it</td></tr><tr><td>Entra-issued tokens exchanged by Databricks (instead of GitHub tokens)</td><td>Only needed if Entra Conditional Access must apply to the pipeline</td></tr><tr><td>The SSO-off baseline</td><td>Needs SSO off on an account shared with other work</td></tr></tbody></table></div><h3>What to plan around</h3><ul><li><strong>Keep Google workload identity federation.</strong> Creating workspaces, network configurations and endpoint registrations needs a Google access token in the <code>X-Databricks-GCP-SA-Access-Token</code> header, whichever identity signs in to Databricks. Entra replaces the Databricks half only.</li><li><strong>Assign workspaces to groups added directly from Entra, and give each an entitlement inside the workspace.</strong> Without the entitlement, members reach the workspace and are refused. Nested groups work for membership, but Terraform can't see or manage them.</li><li><strong>Revoke access in Databricks too when someone leaves.</strong> Disabling the person in Entra stops their sign-in at once, but the Databricks user isn't deactivated straight away, so personal access tokens and open sessions need revoking separately.</li><li><strong>AIM provisions lazily.</strong> Users appear at first sign-in, service principals when added from Entra or first used; Terraform can't manage a principal until then.</li><li><strong>Workspace creation has a daily limit per account.</strong> A teardown and rebuild on one day, or many workspaces at once, can reach it; the API answers <code>429 RESOURCE_EXHAUSTED</code>. Plan large rollouts across days.</li><li><strong>Two ways to give the pipeline an Entra identity.</strong> With the GitHub token exchanged directly (tested), the identity is owned and disabled in Entra and the trust stays narrow. With Entra tokens exchanged by Databricks (not tested), Entra's Conditional Access also applies, at the cost of a second exchange and an account-wide trust of the Entra tenant.</li></ul></section></main>
+
+</body>
+</html>

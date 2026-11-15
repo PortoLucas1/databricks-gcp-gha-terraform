@@ -38,6 +38,7 @@ Beyond the hypotheses: nineteen findings (R1–R19), from GitHub's immutable-ID 
 | [Use case](docs/USE_CASE.md) | The scenario behind the test: Entra SSO and AIM for people, a pipeline identity outside Entra. The first design, why it breaks, what the lab proved for it, and the tests that answered it (U0–U7) |
 | [Use case test plan](docs/USE_CASE_TEST_PLAN.md) | U0–U7: the use case on an account with Entra SSO and AIM, the lab's pipeline unchanged; prerequisites, changes, teardown, cost |
 | [Use case results](docs/USE_CASE_RESULTS.md) | Status of U0–U7: what's proven on Entra SSO and AIM, findings R15–R19, what's left |
+| [Published deliverables](docs/site/) | The deliverables as pages: [E1–E7](docs/site/index.html), the [Entra test status](docs/site/status.html), the [AIM assessment](docs/site/aim-assessment.html). Built from the markdown by `docs/site/build.py` |
 | [Test requirements](docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md) | The question, public facts F1–F12, hypotheses H1–H12, the planned phases. Written before testing |
 | [Test plan and step log](docs/TEST_PLAN.md) | How each step ran and what it returned, step by step |
 | [E1 Results](docs/deliverables/E1_RESULTS.md) | Each hypothesis, its result and evidence; findings R1–R19; the end-to-end rebuild |

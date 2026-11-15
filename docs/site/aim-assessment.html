@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body style="margin:0">
+<title>Entra AIM Pipeline Identity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: a technical dossier. Sticky contents rail on wide screens, one reading column (tables and diagrams scroll inside their own frames). */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #5a6776;
+  --line: #d8dee5;
+  --line-strong: #8d99a6;
+  --accent: #0e6b70;          /* Google side, links */
+  --accent-soft: #e2f0f0;
+  --dbx: #a8501a;             /* Databricks side */
+  --dbx-soft: #f8ebe2;
+  --refuse: #b42318;
+  --refuse-soft: #fbe9e7;
+  --ok: #1d7a3e;
+  --code-bg: #eef1f4;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #161d24; --ink: #e3e8ee; --muted: #94a1af; --line: #283340; --line-strong: #6d7a88;
+    --accent: #4fb1b6; --accent-soft: #153033; --dbx: #e2905a; --dbx-soft: #33231a; --refuse: #f0776b; --refuse-soft: #3a1d1b;
+    --ok: #5cc07e; --code-bg: #1d2630; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #161d24; --ink: #e3e8ee; --muted: #94a1af; --line: #283340; --line-strong: #6d7a88;
+  --accent: #4fb1b6; --accent-soft: #153033; --dbx: #e2905a; --dbx-soft: #33231a; --refuse: #f0776b; --refuse-soft: #3a1d1b;
+  --ok: #5cc07e; --code-bg: #1d2630; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.6 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font: 0.86em/1.4 var(--f-mono); background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+strong { font-weight: 600; }
+
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 960px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; } .rail { display: none; } }
+
+/* masthead */
+.mast { max-width: 1240px; margin: 0 auto; padding-block: 48px 32px; border-bottom: 1px solid var(--line); margin-bottom: 40px; }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.eyebrow b { color: var(--ok); font-weight: 500; }
+h1 { font: 600 clamp(32px, 5vw, 50px)/1.05 var(--f-display); letter-spacing: -0.01em; margin: 16px 0 14px; text-wrap: balance; }
+.lede { max-width: 68ch; font-size: 17px; color: var(--muted); margin: 0; }
+.lede strong { color: var(--ink); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 28px; }
+.fact { background: var(--surface); padding: 16px 18px; min-width: 0; }
+.fact .k { font: 600 19px/1.2 var(--f-display); display: block; margin-bottom: 4px; }
+.fact .v { font-size: 13.5px; color: var(--muted); }
+.fact.g .k { color: var(--accent); } .fact.d .k { color: var(--dbx); } .fact.x .k { color: var(--refuse); }
+
+/* contents rail */
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; }
+.rail h3 { font: 500 11px/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.rail ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+.rail li a { display: flex; gap: 10px; padding: 7px 0 7px 14px; margin-left: -1px; border-left: 2px solid transparent; color: var(--ink); text-decoration: none; font-size: 14px; line-height: 1.3; }
+.rail li a span { font: 500 12px/1.5 var(--f-mono); color: var(--muted); min-width: 22px; }
+.rail li a:hover { border-left-color: var(--accent); color: var(--accent); }
+.rail .note { font-size: 12.5px; color: var(--muted); margin-top: 20px; line-height: 1.5; }
+
+/* documents */
+main { min-width: 0; }
+.doc { padding-bottom: 40px; margin-bottom: 40px; border-bottom: 1px solid var(--line); }
+.doc:last-child { border-bottom: 0; }
+.doc-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+.code-tag { font: 500 13px/1 var(--f-mono); color: var(--surface); background: var(--ink); padding: 5px 7px; border-radius: 4px; flex: none; }
+.doc h2 { font: 600 clamp(24px, 3.2vw, 32px)/1.15 var(--f-display); margin: 0; text-wrap: balance; }
+.doc h3 { font: 600 20px/1.25 var(--f-display); margin: 34px 0 10px; text-wrap: balance; }
+.doc h4 { font: 600 16px/1.3 var(--f-body); margin: 24px 0 8px; }
+.doc p, .doc li { max-width: 74ch; }
+.doc p { margin: 10px 0; }
+.doc ul, .doc ol { padding-left: 22px; margin: 10px 0; }
+.doc li { margin: 5px 0; }
+.doc li > p { margin: 4px 0; }
+.doc li > ul, .doc li > ol { margin: 4px 0; }
+
+.tbl { overflow-x: auto; margin: 14px 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.5; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font: 600 12px/1.3 var(--f-body); letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; min-width: 9em; }
+td { min-width: 7em; }
+pre.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 12px 0 16px; }
+pre.code code { background: none; padding: 0; font-size: 13px; line-height: 1.55; overflow-wrap: normal; }
+
+/* figures */
+.fig { margin: 22px 0 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; }
+.fig .scroll { overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 760px; height: auto; font-family: var(--f-body); }
+.fig figcaption { font-size: 13.5px; color: var(--muted); margin-top: 12px; max-width: 90ch; }
+.fig figcaption strong { color: var(--ink); }
+svg .t { fill: var(--ink); font-size: 12.5px; }
+svg .t.strong { font-weight: 600; }
+svg .t.small { font-size: 11px; }
+svg .t.muted { fill: var(--muted); }
+svg .t.label { font: 500 10.5px var(--f-mono); letter-spacing: 0.08em; fill: var(--muted); }
+svg .gtext { fill: var(--accent); } svg .dtext { fill: var(--dbx); } svg .xtext { fill: var(--refuse); font-weight: 600; }
+svg .zone { fill: none; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 4; }
+svg .zone.g { stroke: var(--accent); } svg .zone.d { stroke: var(--dbx); }
+svg .sub { fill: var(--accent-soft); stroke: none; opacity: 0.55; }
+svg .sub2 { fill: var(--surface); stroke: var(--line); }
+svg .node { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+svg .node.g { stroke: var(--accent); } svg .node.d { stroke: var(--dbx); fill: var(--dbx-soft); }
+svg .node.x { stroke: var(--refuse); fill: var(--refuse-soft); }
+svg .flow { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+svg .flow.g { stroke: var(--accent); } svg .flow.d { stroke: var(--dbx); }
+svg .flow.x { stroke: var(--refuse); stroke-dasharray: 6 5; }
+svg .flow.dash { stroke-dasharray: 3 3; stroke: var(--muted); }
+svg .flow.reply { stroke-dasharray: 5 4; stroke: var(--muted); }
+svg .ah { fill: var(--ink); } svg .ah-g { fill: var(--accent); } svg .ah-d { fill: var(--dbx); } svg .ah-x { fill: var(--refuse); }
+svg .life { stroke: var(--line-strong); stroke-dasharray: 2 4; }
+svg .band { fill: var(--bg); stroke: var(--line); }
+svg .tag { stroke-width: 1; }
+svg .tag.g { fill: var(--accent-soft); stroke: var(--accent); } svg .tag.d { fill: var(--dbx-soft); stroke: var(--dbx); }
+
+.foot { max-width: 1240px; margin: 0 auto; font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style>.single { max-width: 960px; margin: 0 auto; }
+pre.mermaid { background: none; border: 0; margin: 0; min-width: 720px; text-align: center; }</style>
+<header class="mast single">
+  <div class="eyebrow"><span>Assessment</span><span>Databricks on Google Cloud · GitHub Actions · Microsoft Entra ID</span><span><b>2026-11-13; open points tested the same day</b></span></div>
+  <h1>Entra identity for GitHub Actions, provisioned by AIM: viability</h1>
+</header>
+<main class="single"><section class="doc"><p><strong>Assessment, 2026-11-13; its open points tested the same day (use case test U7).</strong> The customer asked whether the pipeline could authenticate to Databricks as a <strong>Microsoft Entra ID identity</strong> that <strong>automatic identity management (AIM)</strong> pushes into the Databricks account, instead of a Databricks-native service principal. This is a desk assessment against the Databricks on GCP documentation; the lab didn't test it (H11 was out of scope, and AIM needs the account's SSO to be Entra, which the lab's account wasn't at the time).</p><h3>Short answer</h3><p><strong>Viable on GCP. Option C is proven at account level; option B is untested.</strong></p><ul><li>AIM with Entra is generally available on Databricks on GCP (May 2026), syncs Entra <strong>service principals</strong>, and Databricks on GCP accepts Entra-issued tokens through <strong>OAuth token federation</strong>. So an Entra service principal can be the pipeline's Databricks identity.</li><li>Databricks on GCP doesn't accept Entra tokens directly, as Azure Databricks does: every Entra token goes through Databricks' token exchange against a federation policy.</li><li><strong>The Google side doesn't change.</strong> Creating workspaces, network configurations and endpoint registrations still needs a Google access token in <code>X-Databricks-GCP-SA-Access-Token</code> (hypotheses H3 and H4 in <a href="index.html#results">E1</a>), so the pipeline keeps its Google workload identity federation either way.</li><li>Three things the documentation doesn't settle decided whether it works for this pipeline. <strong>All three were tested and hold</strong> (use case test U7): a synced service principal's Databricks <strong>application ID is its Entra client ID</strong>; it can hold <strong>account admin</strong>; and it can carry its <strong>own federation policy</strong>. With that policy, a GitHub Actions job signed in as the synced principal (option C below).</li></ul><h3>What the documentation says</h3><div class="tbl"><table><thead><tr><th>#</th><th>Fact</th><th>Source</th></tr></thead><tbody><tr><td>A1</td><td>AIM with Microsoft Entra ID is generally available on GCP (release notes, May 26, 2026). Not on the Standard tier</td><td><a href="https://docs.databricks.com/gcp/en/release-notes/product/2026/may" target="_blank" rel="noopener">Release notes, May 2026</a>; <a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management/migrate-to-aim" target="_blank" rel="noopener">Migrate to AIM</a></td></tr><tr><td>A2</td><td>AIM requires <strong>Entra SSO with the same tenant</strong>, a single tenant (no cross-tenant identities), and identity-federated workspaces</td><td><a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management/migrate-to-aim" target="_blank" rel="noopener">Migrate to AIM</a>; <a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management/ms-entra-id" target="_blank" rel="noopener">Configure Entra for AIM</a>; <a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management" target="_blank" rel="noopener">AIM</a></td></tr><tr><td>A3</td><td>AIM syncs Entra <strong>service principals</strong> (SCIM can't). They are provisioned <strong>on first use</strong> (token authentication, job execution) or when an admin adds them from Entra in the account console; adding a group that contains them doesn't</td><td><a href="https://docs.databricks.com/gcp/en/admin/users-groups/manage-service-principals" target="_blank" rel="noopener">Service principals</a>; <a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management" target="_blank" rel="noopener">AIM</a></td></tr><tr><td>A4</td><td>Service principals not directly provisioned to the account <strong>can't be retrieved or managed through the Databricks APIs or Terraform</strong>; the fix is to provision them explicitly. Entra overwrites their display names, so refer to them by application ID. Synced ones can't be removed from the list</td><td><a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management" target="_blank" rel="noopener">AIM</a>; <a href="https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management/migrate-to-aim" target="_blank" rel="noopener">Migrate to AIM</a></td></tr><tr><td>A5</td><td>An Entra identity authenticates on GCP by <strong>token exchange</strong> (RFC 8693). For an AIM-synced identity this needs an <strong>account federation policy</strong> that trusts the Entra issuer; without it the exchange is refused, and no Databricks-native service principal is involved</td><td><a href="https://docs.databricks.com/gcp/en/ingestion/zerobus-ingest" target="_blank" rel="noopener">Zerobus Ingest, Entra authentication</a></td></tr><tr><td>A6</td><td>Two kinds of federation policy: <strong>account-wide</strong> (any user or service principal in the account, matched by a token claim) and <strong>service principal</strong> (one principal, exact issuer, subject and audience). Any trusted OIDC issuer; up to 20 of each</td><td><a href="https://docs.databricks.com/gcp/en/dev-tools/auth/oauth-federation" target="_blank" rel="noopener">OAuth token federation</a>; <a href="https://docs.databricks.com/gcp/en/dev-tools/auth/oauth-federation-policy" target="_blank" rel="noopener">Federation policies</a></td></tr><tr><td>A7</td><td>Not stated in the documentation; <strong>tested 2026-11-13 (U7): yes to all three.</strong> The application ID is the Entra client ID (its external ID is the Entra service principal's object ID); account admin is accepted; a service principal federation policy is accepted, and a GitHub token exchanged against it signs in as the synced principal</td><td>The pages above; the lab's test plan, U7</td></tr></tbody></table></div><h3>Three ways to wire it</h3><figure class="fig"><div class="scroll"><pre class="mermaid">flowchart LR
+    GH[&quot;GitHub Actions job&lt;br/&gt;GitHub OIDC token&quot;]
+    subgraph A[&quot;A: today (lab-proven)&quot;]
+        A1[&quot;Databricks token exchange&lt;br/&gt;SP federation policy: GitHub issuer, exact sub&quot;]
+        A2[&quot;Databricks-native SP&lt;br/&gt;made by bootstrap/&quot;]
+    end
+    subgraph B[&quot;B: Entra in the token path&quot;]
+        B1[&quot;Entra token endpoint&lt;br/&gt;federated credential: GitHub repo and branch&quot;]
+        B2[&quot;Databricks token exchange&lt;br/&gt;account federation policy: Entra issuer&quot;]
+        B3[&quot;AIM-synced Entra SP&quot;]
+    end
+    subgraph C[&quot;C: Entra-governed identity, GitHub token&quot;]
+        C1[&quot;Databricks token exchange&lt;br/&gt;SP federation policy: GitHub issuer&quot;]
+        C2[&quot;AIM-synced Entra SP&quot;]
+    end
+    GH --&gt; A1 --&gt; A2
+    GH --&gt; B1 --&gt; B2 --&gt; B3
+    GH --&gt; C1 --&gt; C2
+    GH -- &quot;unchanged in all three&quot; --&gt; G[&quot;Google STS: apply identity&lt;br/&gt;token for the X-Databricks-GCP-SA-Access-Token header&quot;]
+</pre></div><figcaption><strong>Three ways to wire it.</strong> The Google side, which supplies the token for the header, is the same in all three.</figcaption></figure><div class="tbl"><table><thead><tr><th></th><th><strong>A. Databricks-native principal</strong> (the lab)</th><th><strong>B. Entra token, AIM principal</strong> (what the customer asked)</th><th><strong>C. GitHub token, AIM principal</strong></th></tr></thead><tbody><tr><td>Token path</td><td>GitHub → Databricks</td><td>GitHub → <strong>Entra</strong> → Databricks</td><td>GitHub → Databricks</td></tr><tr><td>Where the identity lives</td><td>Databricks account</td><td>Entra (synced by AIM)</td><td>Entra (synced by AIM)</td></tr><tr><td>Who decides the job may act</td><td>Databricks SP federation policy</td><td>Entra federated credential (repo, branch or environment), then Databricks' account policy</td><td>Databricks SP federation policy</td></tr><tr><td>Entra Conditional Access, sign-in logs, risk policies on the pipeline</td><td>No</td><td><strong>Yes</strong> (Conditional Access for workload identities needs Entra Workload ID licences)</td><td>No: Entra isn't asked for a token</td></tr><tr><td>Disabling the identity in Entra stops the pipeline</td><td>No</td><td>Yes</td><td>Yes, once AIM syncs the change</td></tr><tr><td>Federation policy breadth</td><td>One principal, exact subject</td><td><strong>Account-wide</strong>: trusts the whole Entra tenant for every synced user and principal whose token has the configured audience</td><td>One principal, exact subject</td></tr><tr><td>Terraform</td><td><code>bootstrap/</code> creates everything</td><td><code>azuread</code> provider for the app, its service principal and the GitHub federated credential; the Databricks side only after AIM has provisioned the principal</td><td>As B for Entra, without the account-wide policy</td></tr><tr><td>Terraform provider auth</td><td><code>github-oidc</code></td><td><code>env-oidc</code>: the job puts the Entra token in <code>DATABRICKS_OIDC_TOKEN</code></td><td><code>github-oidc</code></td></tr><tr><td>Proven</td><td>Yes, end to end (E1)</td><td>No</td><td><strong>Yes, at account level</strong> (U7): sign-in as account admin. Not yet run through a workspace build</td></tr><tr><td>Open questions (A7)</td><td>None</td><td>None left from A7; the Entra token exchange itself is untested</td><td>None at account level</td></tr></tbody></table></div><h3>What B changes in the reference implementation</h3><ol><li><strong><code>bootstrap/</code></strong> gains the <code>azuread</code> provider: an app registration and its service principal, and a federated identity credential trusting <code>https://token.actions.githubusercontent.com</code> with the repository's subject. GitHub issues the <strong>immutable-ID subject</strong> (R1), and Entra matches federated credential subjects exactly too, so build it from the numeric IDs, as <code>bootstrap/databricks.tf</code> does today.</li><li><strong>Provisioning order.</strong> The Databricks side can't be managed until AIM has provisioned the principal (A4). Bootstrap becomes two steps: add the principal in the account console from Entra (or let a first <code>auth-check</code> run provision it), then apply the Databricks part: account admin role and the account federation policy (Entra issuer, a dedicated audience, the claim that carries the application ID).</li><li><strong>Workflows.</strong> Each job that talks to Databricks first gets an Entra token for the app (<code>azure/login</code> with OIDC, or a direct client-assertion request to the Entra token endpoint) with the audience the account policy expects, then sets <code>DATABRICKS_OIDC_TOKEN</code> for the provider (<code>auth_type = &quot;env-oidc&quot;</code>) and for <code>.github/scripts/databricks-token.sh</code>. The Google step is unchanged.</li><li><strong>Self-hosted runner</strong> egress adds <code>login.microsoftonline.com</code>.</li><li><strong><code>databricks_service_principal</code> leaves <code>bootstrap/</code>.</strong> Terraform can't create an AIM-managed principal; it looks it up by application ID.</li></ol><p>C changes only steps 2 (without the account-wide policy) and 5, and keeps the lab's workflows.</p><h3>Risks</h3><div class="tbl"><table><thead><tr><th>Risk</th><th>Applies to</th><th>Mitigation</th></tr></thead><tbody><tr><td>An account-wide federation policy trusts any token the Entra tenant issues with the configured audience, for every synced user and principal</td><td>B</td><td>A dedicated application ID URI as the audience, used by nothing else; Entra app assignment required on that app; review who can obtain tokens for it</td></tr><tr><td>Entra becomes a dependency of every pipeline run</td><td>B</td><td>Already true for people (SSO); keep a break-glass account admin outside Entra (F12)</td></tr><tr><td>AIM provisions principals lazily and Terraform can't see them until then</td><td>B, C</td><td>Explicit provisioning step in bootstrap; refer to the principal by application ID only</td></tr><tr><td>Display name and lifecycle owned by Entra</td><td>B, C</td><td>Treat Entra as the source of truth; deletion and disabling happen there</td></tr><tr><td>AIM needs Entra SSO on the same tenant</td><td>B, C</td><td>The customer's account already uses Entra SSO; a lab account would need the same before testing</td></tr></tbody></table></div><h3>How it was proved, and what's left</h3><p>Run on 2026-11-13 on an account with Entra SSO and AIM on (use case test U7). Steps 1, 2 and 4 passed; 3 and 5 weren't run:</p><ol><li>Register an Entra app with a GitHub federated credential for a test repository's <code>main</code>. Add its service principal to the Databricks account from Entra (AIM). Record the Databricks application ID: is it the Entra client ID? (A7)</li><li>Assign it <strong>account admin</strong>. (A7)</li><li><strong>B:</strong> create an account federation policy for the Entra issuer and a dedicated audience. From a GitHub Actions job: GitHub token → Entra token → Databricks token exchange → list workspaces (the lab's C2). Then a provider plan on <code>env-oidc</code>.</li><li><strong>C:</strong> attach a service principal federation policy (GitHub issuer, immutable-ID subject) to the synced principal; run <code>auth-check</code> unchanged. (A7)</li><li>With either working, one workspace build through the REST provider (the lab's account stack) confirms the header path is unaffected; this step needs the GCP project and costs what the lab did.</li></ol><h3>Recommendation</h3><ul><li><strong>If the goal is that the pipeline's identity is governed in Entra</strong> (one place to own, review and disable identities): <strong>C</strong>, now proven at account level: a synced principal takes account admin and its own federation policy, and the pipeline signs in as it. It keeps the lab-proven single exchange and narrow trust, and changes only how the principal is created. Before adopting it, run one build with it (step 5).</li><li><strong>If the goal is Entra controls on the pipeline's token issuance</strong> (Conditional Access, sign-in logs, risk policies for workload identities): <strong>B</strong>, accepting a second token hop and an account-wide federation policy, scoped by a dedicated audience.</li><li><strong>Otherwise, keep A.</strong> It is proven end to end and has the fewest moving parts.</li></ul><p>In every case the Google side and the REST provider stay as they are: Entra doesn't remove the need for the Google access token on workspace, network configuration and endpoint calls.</p></section></main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });</script>
+</body>
+</html>
