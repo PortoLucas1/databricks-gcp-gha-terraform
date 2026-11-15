@@ -179,7 +179,7 @@ def architecture():
     # GitHub
     s.append(node(36, 84, 160, 60, "GitHub-hosted runner", "GCP + account stacks"))
     s.append(node(36, 178, 160, 52, "OIDC issuer", "signs a token per job"))
-    s.append(node(36, 476, 160, 56, "Any internet client", "even a workspace admin", "n x"))
+    s.append(node(36, 476, 160, 56, "Signed-in internet client", "even a workspace admin", "n x"))
     # CI project
     s.append(box(264, 70, 460, 112, "CI project (bootstrap/)", "sub g"))
     s.append(node(280, 104, 136, 58, "Identity pool", "provider github-oidc", "n g"))
@@ -238,7 +238,7 @@ def auth_flow():
         (0, 1, "token, audience = Databricks account ID", None, False),
         (1, 0, "signed JWT", None, True),
         (0, 4, "token exchange, client_id = principal", "checks federation policy: issuer, exact sub, audience", False),
-        (4, 0, "Databricks token, 1 hour", None, True),
+        (4, 0, "Databricks token, expires with the GitHub token", None, True),
         (0, 5, "POST /workspaces + X-Databricks-GCP-SA-Access-Token", "Databricks acts in the project with the Google token", False),
     ]
     ys, y = [], 112
@@ -251,7 +251,7 @@ def auth_flow():
              '<marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>'
              '</defs>')
     # phase bands
-    phases = [(0, 5, "google-github-actions/auth"), (6, 9, "Databricks provider, github-oidc"), (10, 10, "REST provider")]
+    phases = [(0, 5, "google-github-actions/auth"), (6, 9, "Databricks token exchange (job script, or the provider's github-oidc)"), (10, 10, "REST provider")]
     for a, b, label in phases:
         y0, y1 = ys[a] - 18, ys[b] + (40 if msgs[b][3] else 14)
         s.append(f'<rect x="8" y="{y0}" width="{W-16}" height="{y1-y0}" rx="6" class="band"/>')
@@ -276,12 +276,12 @@ def auth_flow():
     return "".join(s)
 
 FIG_ARCH = ('<figure class="fig" id="architecture"><div class="scroll">' + architecture() + '</div>'
-            '<figcaption><strong>Architecture.</strong> GitHub-hosted runners build the GCP project and call the Databricks Accounts API with two short-lived tokens. '
-            'Workspace-level Terraform runs on a self-hosted runner inside the users\' network and reaches the workspace only through the front-end endpoint. '
-            'Cluster nodes have no internet route: they reach the control plane and the relay through back-end endpoints. From the internet, the workspace refuses even its own admins.</figcaption></figure>')
+            '<figcaption><strong>Architecture.</strong> GitHub-hosted runners build the GCP resources in the workspace project and call the Databricks Accounts API with two short-lived tokens. '
+            'Workspace-level Terraform runs on a self-hosted runner inside the users\' network and reaches the workspace through the front-end endpoint. '
+            'Cluster nodes have no external IP and no NAT: they reach the control plane and the relay through back-end endpoints, and Google APIs through Private Google Access. From the internet, the workspace refused even its own admin (403).</figcaption></figure>')
 FIG_AUTH = ('<figure class="fig" id="auth-flow"><div class="scroll">' + auth_flow() + '</div>'
-            '<figcaption><strong>Authentication.</strong> No key or stored secret anywhere. Each job asks GitHub for a signed token and trades it twice: at Google for the apply identity\'s access token, and at Databricks for the automation principal\'s token. '
-            'Every check in a pill is configured once, by administrators, in <code>bootstrap/</code>.</figcaption></figure>')
+            '<figcaption><strong>Authentication.</strong> No service account key, client secret or stored GitHub secret. An apply job asks GitHub for a signed token per audience: it trades one at Google for the apply identity\'s access token, and, for the Databricks stacks, another at Databricks for the automation principal\'s token. '
+            'Pull-request plans use the plan identity at Google only. Administrators configure every check once, in <code>bootstrap/</code>.</figcaption></figure>')
 
 # ----------------------------------------------------------------- page
 def section(anchor, fn):

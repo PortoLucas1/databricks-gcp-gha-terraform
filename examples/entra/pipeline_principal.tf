@@ -28,7 +28,9 @@ resource "azuread_service_principal" "pipeline" {
 
 # Only needed for option B (Entra tokens exchanged by Databricks): lets a
 # GitHub job get an Entra token for this app. Option C doesn't use it. Entra
-# matches the subject exactly, so it carries the immutable-ID form (R1).
+# matches the subject exactly, so it carries the form the repository's tokens
+# carry: here the immutable-ID form (R1); older repositories that haven't opted
+# in get repo:<owner>/<repo>:ref:<ref>.
 resource "azuread_application_federated_identity_credential" "github_main" {
   count = local.option_c && var.entra_token_exchange != null ? 1 : 0
 

@@ -58,5 +58,5 @@ pipeline_principal_provisioned = false
 - **Assign and entitle together** (R18); a group nested inside an assigned group works for membership but can't be read or managed through the Databricks API or Terraform unless it is added to the account from Entra itself (R17).
 - **Leavers:** disabling a user in Entra blocks new sign-ins through Entra, but the Databricks user still read `active` minutes later; revoke their personal access tokens in Databricks (R19).
 - **Tenant policies apply to Databricks sign-in:** new or test users may need MFA registration, or an exclusion, before they can sign in. Not configured here.
-- **The pipeline principal's federation policy and the Entra federated credential both match the subject exactly:** use the immutable-ID form (R1).
+- **The pipeline principal's federation policy and the Entra federated credential both match the subject exactly:** use the form the repository's tokens carry. Repositories created, renamed or transferred on or after 2026-07-15, or opted in, get the immutable-ID form this example builds (R1); others get `repo:<owner>/<repo>:ref:<ref>` ([GitHub Actions federation](https://docs.databricks.com/gcp/en/dev-tools/auth/provider-github#create-a-federation-policy)).
 - On Windows PowerShell 5.1, the Databricks CLI needs JSON bodies as `--json @file` if you make any of this by hand.
