@@ -44,7 +44,7 @@ Steps 1–6 are `google-github-actions/auth`; steps 7–10 are what the Databric
 ## Why these boundaries
 
 - **Owner ID and repository name** in the Google pool's condition: a deleted account's name can be registered again; its numeric ID can't.
-- **`main` only** for the identities that can write: a free private repository has no branch protection or environment reviewers, so the collaborator list is the real boundary. On a paid plan, bind the apply identity and the federation policy to a GitHub **environment** with required reviewers instead of the branch (Databricks recommends the Environment entity type).
+- **`main` only** for the identities that can write: a free private repository has no branch protection or environment reviewers, so the collaborator list is the real boundary. In a public repository, or a private one on GitHub Enterprise, bind the apply identity and the federation policy to a GitHub **environment** with required reviewers instead of the branch (Databricks recommends the Environment entity type).
 - **The subject's immutable-ID form** (R1): `bootstrap/` builds it from the numeric IDs; otherwise copy it from a real token or a first run's `TOKEN_SUBJECT_INVALID` error.
 - **Created by administrators, not the pipeline:** an identity can't be trusted to create itself. `bootstrap/` is Terraform with its own state in an administrators' bucket, applied locally with their sign-ins; its outputs are the repository variables.
 - **Native or Entra-owned pipeline principal:** the native one (in the Databricks account only) is independent of the directory; the Entra-owned one (option C) puts ownership, reviews and disabling in Entra, with the same narrow GitHub trust. Exchanging Entra-issued tokens instead (option B) would bring Entra Conditional Access to the pipeline, but needs an account-wide federation policy trusting the tenant; untested.
@@ -66,7 +66,7 @@ Steps 1–6 are `google-github-actions/auth`; steps 7–10 are what the Databric
 |---|---|---|---|
 | Entra group | Added from Entra in the account console | Look it up by display name, assign it to workspaces (account stack), give it entitlements in each workspace (workspace stack) | Both steps are needed: an assignment without an entitlement lets members in and then refuses them (R18) |
 | Entra group nested in an added group | Not provisioned | Nothing: invisible to the API (R17) | Its members still get the parent group's access (U4) |
-| Entra user | At first sign-in; linked to Entra a few minutes later | Nothing needed | Disabled in Entra: refused at sign-in, still `active` in Databricks for a while (R19) |
+| Entra user | At first sign-in; linked to Entra a few minutes later | Nothing needed | Disabled in Entra: refused at sign-in, still `active` in Databricks minutes later (R19) |
 | Entra service principal | Added from Entra (or on first use) | Manage by application ID once provisioned | Can be the pipeline's principal (option C, R16) |
 
 ## Databricks-owned identities (created by Databricks during provisioning)

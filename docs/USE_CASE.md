@@ -1,6 +1,6 @@
 # The use case: Entra ID for people, a keyless GitHub Actions identity outside Entra
 
-**Written 2026-11-13, after the lab. Test status: [USE_CASE_RESULTS.md](USE_CASE_RESULTS.md).** This is the scenario behind the [test requirements](DATABRICKS_SSO_TEST_REQUIREMENTS.md). It covers what the organization wants, the pipeline it first designed, and why that design breaks. It then shows how the lab's design answers it, and what nobody has built yet for this exact combination (§6). Facts (F) and hypotheses (H) are from the [requirements](DATABRICKS_SSO_TEST_REQUIREMENTS.md), findings (R) from [E1](deliverables/E1_RESULTS.md), and AIM facts (A) from the [AIM assessment](AIM_ENTRA_ASSESSMENT.md). Identifiers are placeholders.
+**Written 2026-11-13, after the lab. Test status: [USE_CASE_RESULTS.md](USE_CASE_RESULTS.md).** This is the scenario behind the [test requirements](DATABRICKS_SSO_TEST_REQUIREMENTS.md). It covers what the organization wants, the pipeline it first designed, and why that design breaks. It then shows how the lab's design answers it, and how this exact combination was tested (§6; results in [USE_CASE_RESULTS.md](USE_CASE_RESULTS.md)). Facts (F) and hypotheses (H) are from the [requirements](DATABRICKS_SSO_TEST_REQUIREMENTS.md), findings (R) from [E1](deliverables/E1_RESULTS.md), and AIM facts (A) from the [AIM assessment](AIM_ENTRA_ASSESSMENT.md). Identifiers are placeholders.
 
 ## 1. Starting point
 
@@ -96,7 +96,7 @@ The lab kept own-IdP SSO on and changed only the pipeline's Databricks identity 
 
 ## 6. What to build and test for this use case
 
-The organization's target was never tested as a whole: **Entra SSO and AIM on the same account, with the lab's pipeline unchanged.**
+Before these tests, the organization's target hadn't been tested as a whole: **Entra SSO and AIM on the same account, with the lab's pipeline unchanged.** The tests ran on 2026-11-13 and 14; the results are in [USE_CASE_RESULTS.md](USE_CASE_RESULTS.md).
 
 **Prerequisites**
 - A Databricks on GCP account on Enterprise (AIM isn't available on Standard, A1; PSC needs Enterprise), with Entra SSO and Entra AIM on. **Decided 2026-11-13: the existing shared account,** switched from its previous identity provider to Entra for the test and back afterwards; a dedicated account isn't practical, since GCP allows one Databricks account per billing account. The switch changes sign-in for every workspace on the account for the window. Have two account admins, and keep one session open while SSO changes (F12). Details: [USE_CASE_TEST_PLAN.md](USE_CASE_TEST_PLAN.md).
@@ -123,3 +123,4 @@ U1, U3 and U5 are account-level and cost nothing. U2 and U4 cost what the lab di
 
 - **If U1 to U4 pass:** the organization can turn on Entra SSO and AIM for people. It can also keep a keyless Terraform pipeline whose Databricks identity stays out of Entra. This is the lab's design ([E4](deliverables/E4_RECOMMENDATION.md)) on an Entra account.
 - **If U1 or U2 fails:** options B and C in the [AIM assessment](AIM_ENTRA_ASSESSMENT.md), an Entra principal synced by AIM, are the next path. In every case the Google token header stays.
+- **Result (2026-11-14):** U1 to U5 passed ([USE_CASE_RESULTS.md](USE_CASE_RESULTS.md)), so the first case applies. Option C (U7) also works, at account level.

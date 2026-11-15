@@ -1,6 +1,6 @@
 # Entra examples
 
-Terraform for the Entra side of the use case ([USE_CASE.md](../../docs/USE_CASE.md), results in [USE_CASE_RESULTS.md](../../docs/USE_CASE_RESULTS.md)). In the lab these objects were made with `az` and the Databricks CLI; this is the same configuration as code. The Databricks side of group access is in the stacks themselves: [`databricks/groups.tf`](../../databricks/groups.tf) (assignment) and [`workspace/entitlements.tf`](../../workspace/entitlements.tf) (entitlement). The guide is [E6](../../docs/deliverables/E6_CONFIGURATION_GUIDE.md) §6 and §7.
+Terraform for the Entra side of the use case ([USE_CASE.md](../../docs/USE_CASE.md), results in [USE_CASE_RESULTS.md](../../docs/USE_CASE_RESULTS.md)). In the lab these objects were made with `az` and the Databricks CLI; this is the same configuration as code. It passes `terraform validate` in CI but wasn't applied in the lab. One difference: the lab's U7 app also had a GitHub federated credential, which this example creates only for option B. The Databricks side of group access is in the stacks themselves: [`databricks/groups.tf`](../../databricks/groups.tf) (assignment) and [`workspace/entitlements.tf`](../../workspace/entitlements.tf) (entitlement). The guide is [E6](../../docs/deliverables/E6_CONFIGURATION_GUIDE.md) §6 and §7.
 
 Applied locally, like `bootstrap/`, by an Entra administrator (`az login` to the tenant behind the account's SSO and AIM) and a Databricks account admin (a CLI profile on the account console). Prerequisites: Entra SSO and AIM on the account, same tenant.
 
@@ -55,8 +55,8 @@ pipeline_principal_provisioned = false
 
 ## Notes from the lab
 
-- **Assign and entitle together** (R18); a group nested inside an assigned group works for membership but can't be managed in Databricks (R17).
-- **Leavers:** disabling a user in Entra stops their sign-in at once, but the Databricks user stays `active` for a while; revoke their tokens in Databricks (R19).
+- **Assign and entitle together** (R18); a group nested inside an assigned group works for membership but can't be read or managed through the Databricks API or Terraform unless it is added to the account from Entra itself (R17).
+- **Leavers:** disabling a user in Entra blocks new sign-ins through Entra, but the Databricks user still read `active` minutes later; revoke their personal access tokens in Databricks (R19).
 - **Tenant policies apply to Databricks sign-in:** new or test users may need MFA registration, or an exclusion, before they can sign in. Not configured here.
 - **The pipeline principal's federation policy and the Entra federated credential both match the subject exactly:** use the immutable-ID form (R1).
 - On Windows PowerShell 5.1, the Databricks CLI needs JSON bodies as `--json @file` if you make any of this by hand.

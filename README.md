@@ -6,13 +6,13 @@ Reference implementation and test record for building **classic-compute Databric
 - workspaces are reached **privately**, with Private Service Connect front end and back end;
 - the pipeline holds **no keys or stored secrets**: every job exchanges GitHub's OIDC token for short-lived Google and Databricks credentials.
 
-The lab ran on 2026-11-12 and 2026-11-13, was rebuilt from empty state in one pass to validate the whole design, and was then deleted. It was built once more, in a new project, on 2026-11-13 and 14, on an account with Microsoft Entra ID SSO and automatic identity management, to test the customer's target ([use case results](docs/USE_CASE_RESULTS.md)), and deleted again. Everything needed to run it again is here: **[docs/REPRODUCE.md](docs/REPRODUCE.md)**. The `tfvars` files hold placeholders, and every workflow job that signs in skips itself until the repository variables from `bootstrap/` are set.
+The lab ran on 2026-11-12 and 2026-11-13, was rebuilt from empty state in one pass to validate the whole design, and was then deleted. It was built once more, in a new project, on 2026-11-13 and 14, on an account with Microsoft Entra ID SSO and automatic identity management, to test the target scenario ([use case results](docs/USE_CASE_RESULTS.md)), and deleted again. Everything needed to run it again is here: **[docs/REPRODUCE.md](docs/REPRODUCE.md)**. The `tfvars` files hold placeholders, and every workflow job that signs in skips itself until the repository variables from `bootstrap/` are set.
 
 ## What was found
 
-The Databricks Terraform provider, authenticated by GitHub OIDC federation, can't create or update **workspaces, network configurations or VPC endpoint registrations** on an account with its own IdP: those Accounts API calls need a Google access token in the `X-Databricks-GCP-SA-Access-Token` header, which the provider doesn't send ([provider issue #5999](https://github.com/databricks/terraform-provider-databricks/issues/5999)). A generic REST provider ([`magodo/restful`](https://registry.terraform.io/providers/magodo/restful/latest)) sends both tokens, as ephemeral values that never reach a plan file or state, so **everything stays in Terraform**. Everything else (private access settings, permission assignments, workspace objects) works through the Databricks provider.
+The Databricks Terraform provider, authenticated by GitHub OIDC federation, can't create **network configurations or VPC endpoint registrations**, or create or update **workspaces**, on an account with its own IdP: those Accounts API calls need a Google access token in the `X-Databricks-GCP-SA-Access-Token` header, which the provider sends only with Google ID token authentication. [Provider issue #5999](https://github.com/databricks/terraform-provider-databricks/issues/5999) reports this for network configurations; the lab saw it for workspaces too, and endpoint registrations failed the same way in earlier tests on the same account. A generic REST provider ([`magodo/restful`](https://registry.terraform.io/providers/magodo/restful/latest)) sends both tokens, as ephemeral values that never reach a plan file or state, so those objects stay in Terraform too. The rest of what the lab built (private access settings, permission assignments, a cluster policy, a cluster and group entitlements) works through the Databricks provider.
 
-**With Microsoft Entra ID SSO and automatic identity management** (the customer's target, [use case results](docs/USE_CASE_RESULTS.md)): the pipeline is unaffected and built the whole private deployment; people sign in through Entra over Private Service Connect and get workspace access from Entra groups, nested groups included, once Terraform both assigns the group and gives it an entitlement (R18); a person disabled in Entra is blocked at sign-in, though their Databricks user stays active for a while (R19). The pipeline's own identity can also be an Entra service principal synced by AIM (R16). The original design, the provider signing in as a Google service account, is refused under Entra SSO.
+**With Microsoft Entra ID SSO and automatic identity management** (the target scenario, [use case results](docs/USE_CASE_RESULTS.md); SSO with your own identity provider is in Public Preview on GCP): the pipeline is unaffected and built the whole private deployment; people sign in through Entra over Private Service Connect and get workspace access from Entra groups, nested groups included, once Terraform both assigns the group and gives it an entitlement (R18); a person disabled in Entra is blocked at sign-in, though their Databricks user still read active minutes later (R19). The pipeline's own identity can also be an Entra service principal synced by AIM (R16), shown at account level and not yet through a full build. The original design, the provider signing in as a Google service account, is refused under Entra SSO.
 
 | Hypothesis (from the [test requirements](docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md)) | Result |
 |---|---|
@@ -35,7 +35,7 @@ Beyond the hypotheses: nineteen findings (R1–R19), from GitHub's immutable-ID 
 
 | Document | What it is |
 |---|---|
-| [Use case](docs/USE_CASE.md) | The scenario behind the test: Entra SSO and AIM for people, a pipeline identity outside Entra. The first design, why it breaks, what the lab proved for it, and the tests still to run (U1–U6) |
+| [Use case](docs/USE_CASE.md) | The scenario behind the test: Entra SSO and AIM for people, a pipeline identity outside Entra. The first design, why it breaks, what the lab proved for it, and the tests that answered it (U0–U7) |
 | [Use case test plan](docs/USE_CASE_TEST_PLAN.md) | U0–U7: the use case on an account with Entra SSO and AIM, the lab's pipeline unchanged; prerequisites, changes, teardown, cost |
 | [Use case results](docs/USE_CASE_RESULTS.md) | Status of U0–U7: what's proven on Entra SSO and AIM, findings R15–R19, what's left |
 | [Test requirements](docs/DATABRICKS_SSO_TEST_REQUIREMENTS.md) | The question, public facts F1–F12, hypotheses H1–H12, the planned phases. Written before testing |
@@ -75,13 +75,14 @@ Workflows (`.github/workflows/`):
 - **`psc-refusal`**: manual. The same identity and steps from inside the network and from the internet: shows the workspace refusing internet access to its own admin.
 - **`first-design`**: manual. The use case's first design (provider with `google_service_account`), to show it refused with own-IdP SSO on (U0).
 - **`aim-check`**: manual, read only. What AIM put in the account as the pipeline sees it: groups, workspace assignments, test users (U3, U5).
+- **`workspace-identity-check`**: manual, read only, on the self-hosted runner. How the workspace sees a user: its groups and the groups' entitlements (U4).
 - **`databricks-probe`**: manual. The test steps that weren't Terraform (direct API calls with and without the header).
 
 Every action is pinned to a commit SHA; provider versions are pinned in the lock files (Terraform 1.15.9, Databricks provider 1.142.0, `magodo/restful` 0.25.2, Google provider 8.11.0 when tested).
 
 ## Limits of a private repository on the free plan
 
-GitHub doesn't offer branch protection or environment approvals for private repositories on the free plan, so in the lab whoever could push to `main` could use the apply identity, and the manual gate was a `workflow_dispatch`. With GitHub Pro, a public repository or an organization plan, bind the apply identity and the Databricks federation policy to a GitHub environment with required reviewers instead of the branch.
+GitHub doesn't offer branch protection or environment approvals for private repositories on the free plan, so in the lab whoever could push to `main` could use the apply identity, and the manual gate was a `workflow_dispatch`. In a public repository, or a private one on GitHub Enterprise, bind the apply identity and the Databricks federation policy to a GitHub environment with required reviewers instead of the branch. GitHub Pro and GitHub Team add branch protection and deployment branch rules to private repositories, but not required reviewers.
 
 ## Cost while built
 

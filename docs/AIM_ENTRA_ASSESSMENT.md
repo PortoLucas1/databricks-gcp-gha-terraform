@@ -1,6 +1,6 @@
 # Entra identity for GitHub Actions, provisioned by AIM: viability
 
-**Assessment, 2026-11-13; its open points tested the same day (use case test U7).** The customer asked whether the pipeline could authenticate to Databricks as a **Microsoft Entra ID identity** that **automatic identity management (AIM)** pushes into the Databricks account, instead of a Databricks-native service principal. This is a desk assessment against the Databricks on GCP documentation; the lab didn't test it (H11 was out of scope, and AIM needs the account's SSO to be Entra, which the lab's account wasn't at the time).
+**Assessment, 2026-11-13; its open points tested the same day (use case test U7).** The question: could the pipeline authenticate to Databricks as a **Microsoft Entra ID identity** that **automatic identity management (AIM)** pushes into the Databricks account, instead of a Databricks-native service principal? This is a desk assessment against the Databricks on GCP documentation; the lab didn't test it (H11 was out of scope, and AIM needs the account's SSO to be Entra, which the lab's account wasn't at the time).
 
 ## Short answer
 
@@ -47,7 +47,7 @@ flowchart LR
     GH -- "unchanged in all three" --> G["Google STS: apply identity<br/>token for the X-Databricks-GCP-SA-Access-Token header"]
 ```
 
-| | **A. Databricks-native principal** (the lab) | **B. Entra token, AIM principal** (what the customer asked) | **C. GitHub token, AIM principal** |
+| | **A. Databricks-native principal** (the lab) | **B. Entra token, AIM principal** | **C. GitHub token, AIM principal** |
 |---|---|---|---|
 | Token path | GitHub → Databricks | GitHub → **Entra** → Databricks | GitHub → Databricks |
 | Where the identity lives | Databricks account | Entra (synced by AIM) | Entra (synced by AIM) |
@@ -78,7 +78,7 @@ C changes only steps 2 (without the account-wide policy) and 5, and keeps the la
 | Entra becomes a dependency of every pipeline run | B | Already true for people (SSO); keep a break-glass account admin outside Entra (F12) |
 | AIM provisions principals lazily and Terraform can't see them until then | B, C | Explicit provisioning step in bootstrap; refer to the principal by application ID only |
 | Display name and lifecycle owned by Entra | B, C | Treat Entra as the source of truth; deletion and disabling happen there |
-| AIM needs Entra SSO on the same tenant | B, C | The customer's account already uses Entra SSO; a lab account would need the same before testing |
+| AIM needs Entra SSO on the same tenant | B, C | An account without Entra SSO on the same tenant needs it set up first; the lab account was switched to Entra SSO for the tests |
 
 ## How it was proved, and what's left
 
