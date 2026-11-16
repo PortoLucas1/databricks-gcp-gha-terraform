@@ -1,6 +1,6 @@
 # E6. Configuration guide: Databricks on GCP from GitHub Actions with Terraform, own-IdP SSO (Entra ID and AIM), Private Service Connect
 
-**2026-11-14, verified by an end-to-end rebuild and on Entra SSO with AIM.** End to end, in build order. The reference implementation (E5) is the lab repository; file names below refer to it. Placeholders: `<org-id>`, `<ci-project>`, `<ws-project>`, `<account-id>`, `<owner>`, `<owner-id>`, `<repo>`, `<repo-id>`, `<region>`.
+**2026-11-14, verified by an end-to-end rebuild and on Entra SSO with AIM.** End to end, in build order. The reference implementation (E5) is this repository; file names below refer to it. Placeholders: `<org-id>`, `<ci-project>`, `<ws-project>`, `<account-id>`, `<owner>`, `<owner-id>`, `<repo>`, `<repo-id>`, `<region>`.
 
 ## 0. Architecture
 
@@ -68,7 +68,7 @@ Items 1, 4 and 5 are one Terraform root, `bootstrap/`, applied locally by GCP an
    Set by an Organization Policy Administrator; the Org Policy API refuses user credentials without a quota project. Check it by creating a workspace: provisioning fails partway with an org-policy message if a grant is missing (R2, R3).
 4. **Databricks automation principal** ([Databricks: GitHub Actions federation](https://docs.databricks.com/gcp/en/dev-tools/auth/provider-github)): a service principal, account admin ([F6](https://docs.databricks.com/gcp/en/dev-tools/auth/oauth-m2m)), with a federation policy:
    - issuer `https://token.actions.githubusercontent.com`;
-   - subject **`repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:refs/heads/main`**: GitHub issues the immutable-ID form; copy it from a first run's `TOKEN_SUBJECT_INVALID` error rather than typing it (R1). On a paid plan, prefer an environment subject with required reviewers;
+   - subject **`repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:refs/heads/main`**: repositories created, renamed or transferred on or after 2026-07-15, and older ones that opt in, get this immutable-ID form, and others get `repo:<owner>/<repo>:ref:refs/heads/main` ([GitHub Actions federation](https://docs.databricks.com/gcp/en/dev-tools/auth/provider-github#create-a-federation-policy)). This repository got the ID form; copy the subject from a first run's `TOKEN_SUBJECT_INVALID` error rather than typing it (R1). In a public repository, or a private one on GitHub Enterprise, prefer an environment subject with required reviewers;
    - audience: the default, the account ID.
 5. **Repository variables** (not secrets; nothing here is secret), from `bootstrap/`'s outputs: `GCP_WIF_PROVIDER`, `GCP_APPLY_SA`, `GCP_PLAN_SA`, `TF_STATE_BUCKET`, `DATABRICKS_ACCOUNT_ID`, `DATABRICKS_CLIENT_ID` (the principal's application ID). Then run `auth-check`, which shows each hop of the chain without printing a credential.
 6. **Entra SSO and AIM** (when people come from Entra; [Databricks: automatic identity management](https://docs.databricks.com/gcp/en/admin/users-groups/automatic-identity-management)):
@@ -178,10 +178,10 @@ resource "databricks_entitlements" "group" {
 
 - **Order:** add the group from Entra; apply the account stack (assignment); apply the workspace stack (entitlement). An assignment alone lets members reach the workspace and then refuses them: "not assigned or no Workspace access entitlement" (R18). In a new workspace the built-in `users` group carries no entitlement to fall back on.
 - **Entitlements unset unless true:** the provider refuses `workspace_consume` next to `workspace_access` or `databricks_sql_access`, even when one of them is `false`.
-- **Nested groups:** members of a group nested inside an assigned group get access, but the nested group itself isn't visible to the API or Terraform (R17). Assign the parent.
+- **Nested groups:** members of a group nested inside an assigned group get access, but the nested group itself isn't visible to the API or Terraform unless it is added to the account from Entra too (R17). Assign the parent.
 - **Users** are created at first sign-in and linked to Entra a few minutes later; nothing to manage in Terraform.
-- **Private sign-in:** with public access off, people reach the workspace only through the front-end endpoint (their network's DNS to it); from the internet they are refused after signing in (U4). To test it from outside the network, a browser on an SSH SOCKS proxy through a VM in the users' network, with DNS resolved on the VM's side, shows the private path.
-- **Leavers:** disable in Entra (sign-in stops at once) and revoke personal access tokens and sessions in Databricks: the Databricks user isn't deactivated straight away (R19).
+- **Private sign-in:** with public access off, people reach the workspace only through the front-end endpoint (their network's DNS to it); from the internet they are refused after signing in: the pipeline's identity got `403` "Unauthorized network access" (R12), and a member's sign-in from the internet was refused too, though before their group had its entitlement (U4). To test it from outside the network, a browser on an SSH SOCKS proxy through a VM in the users' network, with DNS resolved on the VM's side, shows the private path.
+- **Leavers:** disable in Entra (new sign-ins through Entra stop) and revoke their personal access tokens in Databricks, as the AIM page recommends for deactivated users: the Databricks user still read `active` minutes later (R19).
 - **The Entra groups themselves** (and nesting) as Terraform: [`examples/entra/`](../../examples/entra/) (`groups.tf`).
 
 ## 7. Optional: the pipeline's identity from Entra (option C)
@@ -208,7 +208,7 @@ Terraform can't create this principal in Databricks; it can manage it by applica
 | With Entra SSO and AIM: the pipeline | `auth-check` passes after each change | Passed (U1) |
 | With Entra SSO and AIM: groups | `aim-check`: the group found, the workspace assignment listed; `workspace-identity-check`: the group on a member's workspace record, with its entitlement | As expected (U3, U4) |
 | With Entra SSO and AIM: people, through the front end | A direct member and a nested member reach the workspace; someone in neither group is refused | As expected (U4) |
-| With Entra SSO and AIM: people, from the internet | Refused after signing in | As expected (U4) |
+| With Entra SSO and AIM: people, from the internet | Refused after signing in | As expected (U4), though that sign-in came before the group's entitlement; the network refusal itself is R12 |
 | A person disabled in Entra | Refused at Entra's sign-in; `auth-check` passes | As expected; the Databricks user still `active` minutes later (U5, R19) |
 
 ## 9. Teardown

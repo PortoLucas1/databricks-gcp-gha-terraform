@@ -1,6 +1,6 @@
 # Private Service Connect scenarios
 
-The client will reach its Databricks workspaces privately over Private Service Connect (PSC). Two designs fit that, and the lab builds both, because it isn't settled which the client means. Either way the GitHub Actions flow is the same: workspace creation is an account API call, made by GitHub-hosted runners with the federated Databricks token and the Google token header, through the REST provider (see [TEST_PLAN.md](TEST_PLAN.md)). PSC changes what exists around the workspace, not how Terraform authenticates.
+In the target scenario, workspaces are reached privately over Private Service Connect (PSC). Two designs fit that, and the lab builds both, because it wasn't settled which one the scenario needs. Either way the GitHub Actions flow is the same: workspace creation is an account API call, made by GitHub-hosted runners with the federated Databricks token and the Google token header, through the REST provider (see [TEST_PLAN.md](TEST_PLAN.md)). PSC changes what exists around the workspace, not how Terraform authenticates.
 
 ## The two PSC paths
 
@@ -59,4 +59,4 @@ With public access off, workspace-level Terraform can't run on GitHub-hosted run
 | Workspace VPC | Can be shared with other workspaces without back-end PSC | One private DNS view: only back-end PSC workspaces |
 | Adding the other path later | Back end: unverified on GCP, may need a new workspace | Nothing to add |
 
-Recommendation until the client says otherwise: B. It costs two endpoints, and A's only way to B may be rebuilding the workspace.
+Recommendation, unless the organization needs otherwise: B. It costs two endpoints, and A's only way to B may be rebuilding the workspace.

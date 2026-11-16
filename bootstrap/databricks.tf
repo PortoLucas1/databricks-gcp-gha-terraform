@@ -24,8 +24,10 @@ resource "databricks_service_principal_role" "automation_account_admin" {
   role                 = "account_admin"
 }
 
-# GitHub issues the immutable-ID subject, repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:<ref>,
-# not the name-only form in older documentation; Databricks matches the
+# This repository's tokens carry the immutable-ID subject,
+# repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:<ref> (repositories created,
+# renamed or transferred on or after 2026-07-15, or opted in; others get the
+# name-only form repo:<owner>/<repo>:ref:<ref>). Databricks matches the
 # subject exactly. A wrong subject fails the exchange with
 # TOKEN_SUBJECT_INVALID, which names the subject the token carried.
 # The audience is left at its default, the account ID.

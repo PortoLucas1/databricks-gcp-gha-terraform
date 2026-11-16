@@ -22,7 +22,7 @@ resource "azuread_group" "access" {
 
   display_name     = each.key
   security_enabled = true
-  description      = "Databricks workspace access (assigned and entitled by Terraform in the gha-databricks-test stacks)."
+  description      = "Databricks workspace access (assigned and entitled by Terraform in this repository's stacks)."
 }
 
 # Members are existing users. Creating users here would put their passwords

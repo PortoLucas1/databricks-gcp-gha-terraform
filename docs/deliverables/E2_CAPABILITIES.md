@@ -47,4 +47,4 @@
 | Self-hosted runner registration | Repository admin | Once per runner (or automated with a GitHub App for ephemeral runners) |
 | Entra SSO and AIM on the Databricks account (SSO app, AIM app registration on the same tenant) | Databricks account admin, Entra administrator | Once |
 | Adding each Entra group (and an Entra-owned pipeline principal, if used) to the account from Entra | Databricks account admin, in the account console | Once per group; then Terraform assigns and entitles it. The Entra groups and app registration themselves can be Terraform: [`examples/entra`](../../examples/entra/) |
-| Leavers: revoking personal access tokens and sessions in Databricks | Workspace admins | Per leaver; disabling the person in Entra doesn't deactivate the Databricks user straight away (R19) |
+| Leavers: revoking personal access tokens in Databricks | Workspace admins | Per leaver; minutes after the disable in Entra, the Databricks user still read `active` (R19) |
