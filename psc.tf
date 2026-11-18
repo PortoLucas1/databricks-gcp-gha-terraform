@@ -49,31 +49,31 @@ resource "google_compute_network" "psc" {
 }
 
 # The workspace's classic compute.
-resource "google_compute_subnetwork" "psc_compute" {
-  name                     = "${local.psc_vpc_name}-${var.region}"
-  region                   = var.region
-  network                  = google_compute_network.psc.id
-  ip_cidr_range            = "10.251.0.0/24"
-  private_ip_google_access = true
+# Pre-provisioned by the network team (docs/LPM_ENTRA.md, "Subnets").
+data "google_compute_subnetwork" "psc_compute" {
+  name    = "${local.psc_vpc_name}-${var.region}"
+  region  = var.region
+  project = var.project_id
 
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
+  lifecycle {
+    postcondition {
+      condition     = self.ip_cidr_range == "10.251.0.0/24"
+      error_message = "Subnet ${local.psc_vpc_name}-${var.region} must use 10.251.0.0/24."
+    }
   }
 }
 
 # The endpoints only.
-resource "google_compute_subnetwork" "psc_endpoints" {
-  name          = "${local.psc_vpc_name}-psc-${var.region}"
-  region        = var.region
-  network       = google_compute_network.psc.id
-  ip_cidr_range = "10.251.1.0/28"
+data "google_compute_subnetwork" "psc_endpoints" {
+  name    = "${local.psc_vpc_name}-psc-${var.region}"
+  region  = var.region
+  project = var.project_id
 
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
+  lifecycle {
+    postcondition {
+      condition     = self.ip_cidr_range == "10.251.1.0/28"
+      error_message = "Subnet ${local.psc_vpc_name}-psc-${var.region} must use 10.251.1.0/28."
+    }
   }
 }
 
@@ -86,7 +86,7 @@ resource "google_compute_address" "psc" {
   region       = var.region
   address_type = "INTERNAL"
   purpose      = "GCE_ENDPOINT"
-  subnetwork   = google_compute_subnetwork.psc_endpoints.id
+  subnetwork   = data.google_compute_subnetwork.psc_endpoints.id
   address      = each.value.address
   description  = each.value.description
 }

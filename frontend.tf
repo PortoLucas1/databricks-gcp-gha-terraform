@@ -36,30 +36,30 @@ resource "google_compute_network" "fe" {
 }
 
 # Where users' machines, a test VM or a self-hosted runner would sit.
-resource "google_compute_subnetwork" "fe_clients" {
-  name                     = "${local.fe_vpc_name}-${var.region}"
-  region                   = var.region
-  network                  = google_compute_network.fe.id
-  ip_cidr_range            = "10.252.0.0/24"
-  private_ip_google_access = true
+# Pre-provisioned by the network team (docs/LPM_ENTRA.md, "Subnets").
+data "google_compute_subnetwork" "fe_clients" {
+  name    = "${local.fe_vpc_name}-${var.region}"
+  region  = var.region
+  project = var.project_id
 
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
+  lifecycle {
+    postcondition {
+      condition     = self.ip_cidr_range == "10.252.0.0/24"
+      error_message = "Subnet ${local.fe_vpc_name}-${var.region} must use 10.252.0.0/24."
+    }
   }
 }
 
-resource "google_compute_subnetwork" "fe_endpoint" {
-  name          = "${local.fe_vpc_name}-psc-${var.region}"
-  region        = var.region
-  network       = google_compute_network.fe.id
-  ip_cidr_range = "10.252.1.0/28"
+data "google_compute_subnetwork" "fe_endpoint" {
+  name    = "${local.fe_vpc_name}-psc-${var.region}"
+  region  = var.region
+  project = var.project_id
 
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
+  lifecycle {
+    postcondition {
+      condition     = self.ip_cidr_range == "10.252.1.0/28"
+      error_message = "Subnet ${local.fe_vpc_name}-psc-${var.region} must use 10.252.1.0/28."
+    }
   }
 }
 
@@ -68,7 +68,7 @@ resource "google_compute_address" "fe" {
   region       = var.region
   address_type = "INTERNAL"
   purpose      = "GCE_ENDPOINT"
-  subnetwork   = google_compute_subnetwork.fe_endpoint.id
+  subnetwork   = data.google_compute_subnetwork.fe_endpoint.id
   address      = local.fe_endpoint_address
   description  = "Databricks workspace web app and REST API, for users."
 }

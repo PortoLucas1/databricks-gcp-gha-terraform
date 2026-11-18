@@ -3,10 +3,8 @@
 # (docs/PSC_SCENARIOS.md). The GCP stack's psc.tf builds the VPC and the two
 # endpoints; apply it first.
 #
-# Every object here needs the Google token header, so all of it is the REST
-# provider's: endpoint registration (which is also what makes Databricks
-# accept the endpoints, PENDING to ACCEPTED), the network configuration that
-# lists them, and the workspace.
+# Endpoint registration, the network configuration, and the LPM workspace
+# create all need the Google token header (restful provider in rest.tf).
 # ---------------------------------------------------------------------------
 
 variable "psc" {
@@ -70,10 +68,7 @@ resource "restful_resource" "network_psc" {
   }
 }
 
-# Created by Terraform through the REST provider, the first real workspace
-# create that way (gha-test-classic was created by the probe and imported).
-# The private access settings are scenario A's, public access on: the front
-# end is the same step in both scenarios and comes later.
+# LPM phase 1: PROVISIONING only. Network + PAS attach is in lpm.tf.
 resource "restful_resource" "workspace_psc" {
   path          = "/workspaces"
   read_path     = "/workspaces/$(body.workspace_id)"
@@ -89,18 +84,20 @@ resource "restful_resource" "workspace_psc" {
         project_id = var.gcp_project_id
       }
     }
-    network_id                 = restful_resource.network_psc.output.network_id
-    private_access_settings_id = databricks_mws_private_access_settings.this.private_access_settings_id
   }
 
-  poll_create = local.workspace_poll
-  poll_update = local.workspace_poll
+  ephemeral_body = {
+    expected_workspace_status = "PROVISIONING"
+  }
+
+  poll_create = local.workspace_poll_provisioning
   poll_delete = local.workspace_delete_poll
 }
 
 # The automation principal as workspace admin, for workspace-level Terraform
 # (workspace/, on the self-hosted runner). An account call that touches no GCP
-# project, so the Databricks provider makes it.
+# project, so the Databricks provider makes it. Wait until LPM attach finishes
+# so the workspace is RUNNING.
 variable "automation_client_id" {
   description = "Application ID of the automation service principal (the DATABRICKS_CLIENT_ID repository variable)."
   type        = string
@@ -114,6 +111,8 @@ resource "databricks_mws_permission_assignment" "automation_psc" {
   workspace_id = restful_resource.workspace_psc.output.workspace_id
   principal_id = tonumber(data.databricks_service_principal.automation.scim_id)
   permissions  = ["ADMIN"]
+
+  depends_on = [restful_operation.workspace_psc_attach]
 }
 
 # The workspace stack reads this (terraform_remote_state) for its provider's
@@ -123,6 +122,6 @@ output "workspace_psc" {
   value = {
     workspace_id = restful_resource.workspace_psc.output.workspace_id
     url          = "https://${restful_resource.workspace_psc.output.deployment_name}.gcp.databricks.com"
-    status       = restful_resource.workspace_psc.output.workspace_status
+    status       = try(restful_operation.workspace_psc_attach.output.workspace_status, restful_resource.workspace_psc.output.workspace_status)
   }
 }

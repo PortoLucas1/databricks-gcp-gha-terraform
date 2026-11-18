@@ -55,7 +55,7 @@ resource "google_compute_router_nat" "fe" {
 
   # The client subnet only; the endpoint subnet never needs it.
   subnetwork {
-    name                    = google_compute_subnetwork.fe_clients.id
+    name                    = data.google_compute_subnetwork.fe_clients.id
     source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
   }
 
@@ -83,7 +83,7 @@ resource "google_compute_instance" "fe_test" {
 
   # No access_config block: no external IP (compute.vmExternalIpAccess).
   network_interface {
-    subnetwork = google_compute_subnetwork.fe_clients.id
+    subnetwork = data.google_compute_subnetwork.fe_clients.id
   }
 
   # compute.requireShieldedVm.
@@ -108,21 +108,9 @@ resource "google_compute_instance" "fe_test" {
   depends_on = [google_project_service.this]
 }
 
-# IAP's forwarding range only: IAP authenticates the user before forwarding.
-resource "google_compute_firewall" "fe_iap_ssh" {
-  name          = "${local.fe_vpc_name}-allow-iap-ssh"
-  network       = google_compute_network.fe.id
-  description   = "SSH via Identity-Aware Proxy. 35.235.240.0/20 is IAP's fixed forwarding range."
-  direction     = "INGRESS"
-  source_ranges = ["35.235.240.0/20"]
-  target_tags   = ["iap-ssh"]
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22"]
-  }
-
-  log_config {
-    metadata = "INCLUDE_ALL_METADATA"
-  }
-}
+# No firewall rules here. NextEra (and similar) deny the apply identity
+# compute.firewalls.create / compute.firewalls.update /
+# compute.networks.updatePolicy. The network team must pre-create:
+#   - intra-subnet ingress (all protocols) on each Databricks subnet
+#   - optional IAP SSH (tcp/22 from 35.235.240.0/20, target tag iap-ssh)
+# See docs/LPM_ENTRA.md.
