@@ -16,18 +16,20 @@ resource "google_compute_network" "this" {
   depends_on = [google_project_service.this]
 }
 
-resource "google_compute_subnetwork" "this" {
-  name                     = "${var.network.name}-${var.region}"
-  region                   = var.region
-  network                  = google_compute_network.this.id
-  ip_cidr_range            = var.network.subnet_cidr
-  private_ip_google_access = true
+# Pre-provisioned by the network team (see docs/LPM_ENTRA.md). The apply
+# identity cannot create subnets: that needs compute.networks.updatePolicy,
+# which the network team denies. The data source fails the plan if the subnet
+# is missing or its range is not the one this stack expects.
+data "google_compute_subnetwork" "this" {
+  name    = "${var.network.name}-${var.region}"
+  region  = var.region
+  project = var.project_id
 
-  # Flow logs bill by volume; with nothing in the subnet there is none.
-  log_config {
-    aggregation_interval = "INTERVAL_10_MIN"
-    flow_sampling        = 0.5
-    metadata             = "INCLUDE_ALL_METADATA"
+  lifecycle {
+    postcondition {
+      condition     = self.ip_cidr_range == var.network.subnet_cidr
+      error_message = "Subnet ${var.network.name}-${var.region} must use ${var.network.subnet_cidr}."
+    }
   }
 }
 

@@ -3,6 +3,7 @@
 Reference implementation and test record for building **classic-compute Databricks workspaces on Google Cloud** from a **GitHub Actions** pipeline with **Terraform**, when:
 
 - the Databricks account's single sign-on uses its **own identity provider** (so Google ID tokens no longer work against the account API);
+- workspaces are created in **least-privilege mode (LPM)** so the apply identity does not need `compute.firewalls.create` / `update` or `compute.networks.updatePolicy` ([LPM + Entra](docs/LPM_ENTRA.md));
 - workspaces are reached **privately**, with Private Service Connect front end and back end;
 - the pipeline holds **no keys or stored secrets**: every job exchanges GitHub's OIDC token for short-lived Google and Databricks credentials.
 

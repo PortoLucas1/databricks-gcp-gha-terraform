@@ -26,4 +26,6 @@ resource "databricks_mws_permission_assignment" "group_psc" {
   workspace_id = restful_resource.workspace_psc.output.workspace_id
   principal_id = tonumber(data.databricks_group.workspace[each.key].id)
   permissions  = each.value
+
+  depends_on = [restful_operation.workspace_psc_attach]
 }

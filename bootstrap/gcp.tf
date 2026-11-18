@@ -70,13 +70,171 @@ resource "google_service_account" "apply" {
   depends_on = [google_project_service.auth]
 }
 
-# Owner, bounded by this one project. Narrow it to the roles the stacks use
-# where a project holds more than the lab.
+# Apply identity project IAM.
+#
+# Default (least_privilege_apply = true): custom role without
+# compute.firewalls.create, compute.firewalls.update, or
+# compute.networks.updatePolicy. Pair with LPM workspace create (databricks/).
+#
+# Lab fallback (least_privilege_apply = false): roles/owner on this project.
 #trivy:ignore:GCP-0007
 #trivy:ignore:AVD-GCP-0007
+resource "google_project_iam_custom_role" "apply_no_firewall" {
+  count = var.least_privilege_apply ? 1 : 0
+
+  role_id     = "gha_apply_no_firewall"
+  title       = "GitHub Actions apply (no firewall)"
+  description = "GCP stack + LPM grants. Omits compute.firewalls.create/update and compute.networks.updatePolicy."
+  permissions = [
+    # Resource manager / IAM / service usage
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.getIamPolicy",
+    "resourcemanager.projects.setIamPolicy",
+    "iam.roles.get",
+    "iam.roles.list",
+    "iam.serviceAccounts.actAs",
+    "iam.serviceAccounts.create",
+    "iam.serviceAccounts.delete",
+    "iam.serviceAccounts.get",
+    "iam.serviceAccounts.getIamPolicy",
+    "iam.serviceAccounts.list",
+    "iam.serviceAccounts.setIamPolicy",
+    "serviceusage.services.enable",
+    "serviceusage.services.get",
+    "serviceusage.services.list",
+    "serviceusage.services.use",
+    # Compute: networks and PSC (no firewalls.*, no networks.updatePolicy)
+    "compute.networks.create",
+    "compute.networks.delete",
+    "compute.networks.get",
+    "compute.networks.list",
+    "compute.networks.update",
+    "compute.networks.use",
+    "compute.subnetworks.create",
+    "compute.subnetworks.delete",
+    "compute.subnetworks.get",
+    "compute.subnetworks.getIamPolicy",
+    "compute.subnetworks.list",
+    "compute.subnetworks.setIamPolicy",
+    "compute.subnetworks.update",
+    "compute.subnetworks.use",
+    "compute.routers.create",
+    "compute.routers.delete",
+    "compute.routers.get",
+    "compute.routers.list",
+    "compute.routers.update",
+    "compute.routers.use",
+    "compute.addresses.create",
+    "compute.addresses.createInternal",
+    "compute.addresses.delete",
+    "compute.addresses.deleteInternal",
+    "compute.addresses.get",
+    "compute.addresses.list",
+    "compute.addresses.setLabels",
+    "compute.addresses.use",
+    "compute.addresses.useInternal",
+    "compute.forwardingRules.create",
+    "compute.forwardingRules.delete",
+    "compute.forwardingRules.get",
+    "compute.forwardingRules.list",
+    "compute.forwardingRules.pscCreate",
+    "compute.forwardingRules.pscDelete",
+    "compute.forwardingRules.pscSetLabels",
+    "compute.forwardingRules.pscUpdate",
+    "compute.forwardingRules.setLabels",
+    "compute.forwardingRules.use",
+    "compute.serviceAttachments.use",
+    # PSC consumer endpoints register in Service Directory (goog-psc-default).
+    "servicedirectory.endpoints.create",
+    "servicedirectory.endpoints.delete",
+    "servicedirectory.endpoints.get",
+    "servicedirectory.endpoints.list",
+    "servicedirectory.endpoints.update",
+    "servicedirectory.namespaces.create",
+    "servicedirectory.namespaces.delete",
+    "servicedirectory.namespaces.get",
+    "servicedirectory.namespaces.list",
+    "servicedirectory.namespaces.update",
+    "servicedirectory.services.create",
+    "servicedirectory.services.delete",
+    "servicedirectory.services.get",
+    "servicedirectory.services.list",
+    "servicedirectory.services.update",
+    "compute.regions.get",
+    "compute.regions.list",
+    "compute.zones.get",
+    "compute.zones.list",
+    "compute.globalOperations.get",
+    "compute.regionOperations.get",
+    "compute.zoneOperations.get",
+    # Optional runner VM
+    "compute.instances.create",
+    "compute.instances.delete",
+    "compute.instances.get",
+    "compute.instances.list",
+    "compute.instances.setLabels",
+    "compute.instances.setMetadata",
+    "compute.instances.setTags",
+    "compute.instances.update",
+    "compute.disks.create",
+    "compute.disks.delete",
+    "compute.disks.get",
+    "compute.disks.list",
+    "compute.disks.use",
+    "compute.disks.setLabels",
+    "compute.images.get",
+    "compute.images.useReadOnly",
+    # DNS
+    "dns.managedZones.create",
+    "dns.managedZones.delete",
+    "dns.managedZones.get",
+    "dns.managedZones.list",
+    "dns.managedZones.update",
+    "dns.changes.create",
+    "dns.changes.get",
+    "dns.changes.list",
+    "dns.networks.bindPrivateDNSZone",
+    "dns.networks.bindDNSResponsePolicy",
+    "dns.networks.targetWithPeeringZone",
+    "dns.policies.create",
+    "dns.policies.delete",
+    "dns.policies.get",
+    "dns.policies.list",
+    "dns.policies.update",
+    "dns.resourceRecordSets.create",
+    "dns.resourceRecordSets.delete",
+    "dns.resourceRecordSets.get",
+    "dns.resourceRecordSets.list",
+    "dns.resourceRecordSets.update",
+    "dns.responsePolicies.create",
+    "dns.responsePolicies.delete",
+    "dns.responsePolicies.get",
+    "dns.responsePolicies.list",
+    "dns.responsePolicies.update",
+    "dns.responsePolicyRules.create",
+    "dns.responsePolicyRules.delete",
+    "dns.responsePolicyRules.get",
+    "dns.responsePolicyRules.list",
+    "dns.responsePolicyRules.update",
+    # State / artifact buckets
+    "storage.buckets.create",
+    "storage.buckets.delete",
+    "storage.buckets.get",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.list",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.update",
+    "storage.objects.create",
+    "storage.objects.delete",
+    "storage.objects.get",
+    "storage.objects.list",
+    "storage.objects.update",
+  ]
+}
+
 resource "google_project_iam_member" "apply" {
   project = var.project_id
-  role    = "roles/owner"
+  role    = var.least_privilege_apply ? google_project_iam_custom_role.apply_no_firewall[0].id : "roles/owner"
   member  = "serviceAccount:${google_service_account.apply.email}"
 }
 

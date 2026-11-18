@@ -69,10 +69,7 @@ locals {
 }
 
 # Scenario A (docs/PSC_SCENARIOS.md): a classic workspace on gha-test-vpc,
-# without back-end PSC. The Databricks provider can't create a network
-# configuration or a workspace on federation with SSO on (C3, C6), so both
-# are the REST provider's. Only the attributes in body are compared with the
-# API's.
+# without back-end PSC. Network config still needs the Google token header.
 resource "restful_resource" "network" {
   path          = "/networks"
   read_path     = "/networks/$(body.network_id)"
@@ -89,15 +86,16 @@ resource "restful_resource" "network" {
   }
 }
 
-# Updates are a PATCH with update_mask naming the fields that change; the API
-# refuses a PATCH without one. The mask is static, so it must name exactly the
-# fields a change touches: add the field here in the same change.
+# LPM phase 1: create in PROVISIONING (no network yet). Private Preview field
+# expected_workspace_status is write-only via ephemeral_body.
 resource "restful_resource" "workspace" {
   path          = "/workspaces"
   read_path     = "/workspaces/$(body.workspace_id)"
   create_method = "POST"
   update_method = "PATCH"
-  update_query  = { update_mask = ["private_access_settings_id"] }
+  # Updates after attach are PAS-only (same as before); network attach is
+  # restful_operation.workspace_attach below.
+  update_query = { update_mask = ["private_access_settings_id"] }
 
   body = {
     workspace_name = "gha-test-classic"
@@ -107,14 +105,13 @@ resource "restful_resource" "workspace" {
         project_id = var.gcp_project_id
       }
     }
-    network_id = restful_resource.network.output.network_id
-    # Switched to a second set and back again through the REST provider
-    # (PATCH with update_mask): a change of private access settings is
-    # reversible.
-    private_access_settings_id = databricks_mws_private_access_settings.this.private_access_settings_id
+    # PAS can be set on create or on attach; attach sets both network + PAS.
   }
 
-  poll_create = local.workspace_poll
-  poll_update = local.workspace_poll
+  ephemeral_body = {
+    expected_workspace_status = "PROVISIONING"
+  }
+
+  poll_create = local.workspace_poll_provisioning
   poll_delete = local.workspace_delete_poll
 }
