@@ -53,7 +53,7 @@ variable "first_design_test" {
 # When true, the apply identity does not get roles/owner. It gets the LPM
 # creator role (lpm.tf) plus google_project_iam_custom_role.apply_no_firewall
 # (gcp.tf), which omits compute.firewalls.create/update and
-# compute.networks.updatePolicy. Use this for NextEra-style orgs.
+# compute.networks.updatePolicy. Use this for organizations that restrict these permissions.
 variable "least_privilege_apply" {
   description = "Grant the apply identity the no-firewall custom role instead of roles/owner."
   type        = bool
