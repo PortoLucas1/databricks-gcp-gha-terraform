@@ -9,6 +9,57 @@ Reference implementation and test record for building **classic-compute Databric
 
 The lab ran on 2026-11-12 and 2026-11-13, was rebuilt from empty state in one pass to validate the whole design, and was then deleted. It was built once more, in a new project, on 2026-11-13 and 14, on an account with Microsoft Entra ID SSO and automatic identity management, to test the target scenario ([use case results](docs/USE_CASE_RESULTS.md)), and deleted again. Everything needed to run it again is here: **[docs/REPRODUCE.md](docs/REPRODUCE.md)**. The `tfvars` files hold placeholders, and every workflow job that signs in skips itself until the repository variables from `bootstrap/` are set.
 
+## Customer guide: using this template
+
+This template is for a customer that needs both of these on a Databricks account on GCP:
+
+1. **Entra ID single sign-on (SSO)** on the account, with Terraform automating the deployment from GitHub Actions.
+2. **Least-privilege mode (LPM)**, so the pipeline's apply identity (`gha-apply`) never holds `compute.firewalls.create`, `compute.firewalls.update`, or `compute.networks.updatePolicy`.
+
+### What the template provides
+
+- **Entra SSO path:** the REST provider (`magodo/restful`) creates and updates the objects the Databricks provider can't with own-IdP SSO on (network configurations, VPC endpoint registrations, workspaces), sending both tokens as ephemeral values.
+- **LPM path:** workspaces are created in `PROVISIONING`, the three operator roles are granted to the workspace service account, then the network and private access settings are attached and the workspace polls to `RUNNING` (`databricks/lpm.tf`, `bootstrap/lpm.tf`).
+- **Narrowed apply role:** `least_privilege_apply = true` (default) gives `gha-apply` a custom role instead of `roles/owner`.
+
+### What the customer must provide
+
+| Requirement | Owner | Why |
+|---|---|---|
+| **Private Preview enabled** for `expected_workspace_status` on the Databricks account | Databricks account team | Required for LPM on GCP. There is no GA alternative that avoids the firewall permissions |
+| Five subnets, pre-created with the names and CIDRs in [docs/LPM_ENTRA.md](docs/LPM_ENTRA.md), Private Google access on | Network team | `gha-apply` can't create subnets without `compute.networks.updatePolicy`. The GCP stack reads them and fails the plan if one is missing or has the wrong range |
+| Intra-subnet ingress firewall rules, and optionally IAP SSH | Network team | This template creates no firewall rules |
+| A GCP project with headroom for LPM bindings (or a dedicated project) | GCP administrator | Each workspace adds project-level IAM bindings. A busy shared project can hit GCP's policy-size limit |
+| Databricks VPC endpoint quota in the target region | Databricks account team | Databricks allows 10 endpoints per region per service attachment per host project. A shared attachment can already be full |
+| A Databricks account admin for the bootstrap | Databricks account admin | Creates the automation principal and its federation policy |
+| A GitHub repository with Actions enabled | Repository admin | Runs the pipeline |
+
+### Dry run in a customer sandbox
+
+Run this in a sandbox project before any customer production project. Each step links to the detailed runbook.
+
+1. **Confirm the Private Preview is enabled** on the account. Without it, the LPM create fails.
+2. **Pre-create the subnets and firewall rules** from the table above.
+3. **Bootstrap** `bootstrap/` locally, once, as a Databricks account admin and a GCP administrator (see [docs/REPRODUCE.md](docs/REPRODUCE.md), section 1). Keep `least_privilege_apply = true`.
+4. **Set the repository variables** from the bootstrap output, then run **auth-check** on `main`. It shows each authentication hop without printing a credential.
+5. **Apply the GCP stack** through the `apply` workflow. It creates the VPCs, PSC endpoints, DNS zone, and response policy as `gha-apply`, with no firewall permissions.
+6. **Apply the Databricks stack** through the `apply` workflow. Expect `PROVISIONING`, then the operator grants, then the attach, then `RUNNING`, for both workspaces.
+7. **Verify:** both workspaces are `RUNNING`; `gha-apply` is denied `compute.firewalls.create` (a quick check with `gcloud` impersonation); a re-plan shows no changes.
+8. **Tear down** only when finished (see the teardown step in [docs/REPRODUCE.md](docs/REPRODUCE.md)). Teardown of LPM workspaces hasn't been tested yet, so run it in the sandbox first.
+
+### Status
+
+| Item | Status |
+|---|---|
+| Entra SSO, with the REST provider | Proven in the lab (see [use case results](docs/USE_CASE_RESULTS.md)) |
+| LPM create → grants → attach → `RUNNING`, as `gha-apply` | Proven in a sandbox project, 2026-11-18 |
+| LPM and Entra SSO together, in one account | Not yet run. The LPM path needs a run on an account with Entra SSO on |
+| `workspace/` stack | Not run in the LPM validation |
+| Teardown of LPM workspaces | Not tested |
+| Staging accounts (`staging-gcp-*` workspace SAs) | Not tested. The derived service-account name assumes `prod-gcp` |
+
+Details and known limits: [docs/LPM_ENTRA.md](docs/LPM_ENTRA.md).
+
 ## What was found
 
 The Databricks Terraform provider, authenticated by GitHub OIDC federation, can't create **network configurations or VPC endpoint registrations**, or create or update **workspaces**, on an account with its own IdP: those Accounts API calls need a Google access token in the `X-Databricks-GCP-SA-Access-Token` header, which the provider sends only with Google ID token authentication. [Provider issue #5999](https://github.com/databricks/terraform-provider-databricks/issues/5999) reports this for network configurations; the lab saw it for workspaces too, and endpoint registrations failed the same way in earlier tests on the same account. A generic REST provider ([`magodo/restful`](https://registry.terraform.io/providers/magodo/restful/latest)) sends both tokens, as ephemeral values that never reach a plan file or state, so those objects stay in Terraform too. The rest of what the lab built (private access settings, permission assignments, a cluster policy, a cluster and group entitlements) works through the Databricks provider.

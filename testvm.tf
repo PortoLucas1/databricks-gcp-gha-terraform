@@ -108,7 +108,7 @@ resource "google_compute_instance" "fe_test" {
   depends_on = [google_project_service.this]
 }
 
-# No firewall rules here. NextEra (and similar) deny the apply identity
+# No firewall rules here. Some organizations deny the apply identity
 # compute.firewalls.create / compute.firewalls.update /
 # compute.networks.updatePolicy. The network team must pre-create:
 #   - intra-subnet ingress (all protocols) on each Databricks subnet
